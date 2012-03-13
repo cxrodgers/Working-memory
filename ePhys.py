@@ -123,7 +123,7 @@ class Spikesort(object):
             for x in caught[ii]: 
                 
                 # Put a 15 sample buffer at the beginning and between peaks
-                if x<15 or x<(peak+15):
+                if x<15 or x<(peak+20):
                     pass 
                 
                 else:
@@ -166,8 +166,8 @@ class Spikesort(object):
         peak = 0;
         
         for p in cat_peaks:
-            # Skip this peak if it is within 15 samples of the previous peak
-            if p - peak <= 15:
+            # Skip this peak if it is within 20 samples of the previous peak
+            if p - peak <= 20:
                 pass
             else:
                 # Grab 30 samples from each channel around previously found peak
