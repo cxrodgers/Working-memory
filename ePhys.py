@@ -5,7 +5,7 @@ import scipy.optimize as opt
 import numpy as np
 import ns5
 import scipy.signal as sig
-import mdp
+from sklearn.decomposition import PCA
 import matplotlib.pylab as plt
 from sklearn import mixture
 import pickle as pkl
@@ -30,6 +30,10 @@ class Spikesort(object):
             filename : path to the recording data file """
     
         self.filename = filename;
+        
+        # Create a dictionary for storing tetrode information
+        self.tetrodes = { 'waveforms' : [] , 'peaks' : [], \
+            'raw': [] }
             
         
     def load_chans(self, channels):
@@ -64,7 +68,7 @@ class Spikesort(object):
         filter_lo = 300 #Hz
         filter_hi = 6000 #Hz
         
-        #Take the frequency, and divide my the Nyquist freq
+        #Take the frequency, and divide by the Nyquist freq
         norm_lo= filter_lo/(30000.0/2)
         norm_hi= filter_hi/(30000.0/2)
         
@@ -73,7 +77,7 @@ class Spikesort(object):
         
         # Apply the filter to the raw data from each channel.  This removes
         # the LFP from the signal.  Also converts to voltage from bits,
-        # the conversion factor is 4096.0 / 2^15 uV/bit.
+        # the conversion factor is 4096.0 / 2^15 mV/bit.
         self.chans = [ sig.filtfilt(b,a,ch)*8192.0/2.**16 for ch in cm_chans ]
     
         # Also save the data, filtered, but without subtracting the common mean.
@@ -82,11 +86,17 @@ class Spikesort(object):
         if hasattr(self, 'clustered'):
             del self.clustered
         
-    def sort(self,threshold = 4,K = 5, dims = 4, to_plot = True, best_K = False):
+    def sort(self,threshold = 5,K = 8, dims = 4, to_plot = True, best_K = False):
         ''' This method combines everything up to clustering. '''
         self.get_spikes(threshold);
         self.get_tetrodes();
-        self.get_pca(to_plot = False);
+        
+        try:
+            self.get_pca(to_plot = False);
+        except:
+            print 'PCA broke!  Ruh roh!'
+            print 'Number of spikes = ' + str(len(self.tetrodes['waveforms']))
+            
         self.get_clusters(K, dims, to_plot, best_K);
         
     def get_spikes(self,threshold):
@@ -178,31 +188,39 @@ class Spikesort(object):
                 
                 # Find the peak sample in that channel
                 peak = (p - 15) + np.argmin(samps[ch]);
-            
-                # Store that peak
-                tetro_peaks.append(peak);
                 
-                # Then grab 30 samples around that peak from each channel
-                samps = [ self.chans[ii][(peak-10):(peak+20)] for ii in np.arange(4) ];
+                # Look at the the only filtered data
+                samps = [ self.filt_chans[ii][(peak-20):(peak+40)] for ii in np.arange(4) ];
+                samps = np.array(samps)
                 
-                # Concatenate into one tetrode waveform
-                cat_spikes = np.concatenate(samps);
+                # If the waveform is pathological, don't store it
+                if (samps > 200).any() or (samps < -500).any():
+                    pass
                 
-                # Store that waveform
-                tetro_spikes.append(cat_spikes);
+                else:
+                    # Store the raw waveform
+                    cat_spikes = np.concatenate(samps);
+                    raw_tetro_spikes.append(cat_spikes);
                 
-                # Do the same for the only filtered data
-                samps = [ self.filt_chans[ii][(peak-10):(peak+20)] for ii in np.arange(4) ];
-                cat_spikes = np.concatenate(samps);
-                raw_tetro_spikes.append(cat_spikes);
-            
+                    # Store the peak
+                    tetro_peaks.append(peak);
+                    
+                    # Then grab 30 samples around that peak from each channel
+                    samps = [ self.chans[ii][(peak-10):(peak+20)] for ii in np.arange(4) ];
+                    
+                    # Concatenate into one tetrode waveform
+                    cat_spikes = np.concatenate(samps);
+                    
+                    # Store that waveform
+                    tetro_spikes.append(cat_spikes);
+                    
         tetro_peaks = np.array(tetro_peaks);
         tetro_spikes = np.array(tetro_spikes);
         raw_tetro_spikes = np.array(raw_tetro_spikes);
         
         # Create a dictionary storing the spike waveforms and the peak times
-        self.tetrodes = { 'waveforms' : tetro_spikes , 'peaks' : tetro_peaks/30000.0, \
-            'raw': raw_tetro_spikes }
+        self.tetrodes = { 'waveforms' : tetro_spikes, 'peaks' : tetro_peaks/30000.0, \
+            'raw' : raw_tetro_spikes }
         
     def get_pca(self,dims=5, to_plot = True):
         """ This method performs PCA on the tetrode waveforms.  PCA can be
@@ -239,7 +257,8 @@ class Spikesort(object):
         spikes = spikes - np.mean(spikes, axis=0);
     
         # Perform PCA!  
-        self.pca = mdp.pca(spikes, output_dim = dims);
+        pca = PCA(n_components = dims)
+        self.pca = pca.fit(spikes).transform(spikes)
         
         # This will generate a scatter plot of each waveform projected on
         # the first two PCA components.
@@ -270,7 +289,6 @@ class Spikesort(object):
         
         # Instantiate the GMM 
         gmm = mixture.GMM(n_components = K);
-        
         
         # Create a vector of each waveform projected in PCA space
         if hasattr(self, 'clustered'):
@@ -397,13 +415,16 @@ class Spikesort(object):
             self.plot_clust(np.arange(k).tolist());
             
 
-    def plot_clust(self, klusters):
+    def plot_clust(self, klusters = None):
         """ This function plots the clusters on the first three PCA components.
         
             Arguments:
             
             klusters : an array or list of the cluster numbers you want to plot
         """
+        
+        if klusters == None:
+            klusters = np.arange(len(self.clustered));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist();
@@ -422,29 +443,34 @@ class Spikesort(object):
         
             # Plot clusters on PCA components 1 & 2
             plt.subplot(131);
-            plt.plot(pca[:,0], pca[:,1], '.',ms=3, color = self.colors[k])
+            plt.scatter(pca[:,0], pca[:,1], marker = '.', linewidths=3, 
+                facecolors = self.colors[k], edgecolors = 'none')
             plt.xlabel('PCA comp 1')
             plt.ylabel('PCA comp 2')
                 
             # Plot clusters on PCA components 1 & 3
             plt.subplot(132);
-            plt.plot(pca[:,0], pca[:,2], '.',ms=3, color = self.colors[k])
+            plt.scatter(pca[:,0], pca[:,2], marker = '.', linewidths=3, 
+                facecolors = self.colors[k], edgecolors = 'none')
             plt.xlabel('PCA comp 1')
             plt.ylabel('PCA comp 3')   
                 
             # Plot clusters on PCA components 2 & 3
             plt.subplot(133);
-            plt.plot(pca[:,1], pca[:,2], '.',ms=3, color = self.colors[k])
+            plt.scatter(pca[:,1], pca[:,2], marker = '.', linewidths=3, 
+                facecolors = self.colors[k], edgecolors = 'none')
             plt.xlabel('PCA comp 2')
             plt.ylabel('PCA comp 3')   
         
         #self.isi(klusters)
         
         # Adjust the figure margins and plot spacing
-        plt.subplots_adjust(left=0.05, right=0.97, top=0.94, bottom=0.1);
+        plt.subplots_adjust(left=0.1, right=0.97, top=0.94, bottom=0.1);
         
         plt.show();
         
+        self.mean_spikes()
+        self.autocorr()
         
         
     def mean_spikes(self, klusters = None, to_plot = True):
@@ -473,14 +499,14 @@ class Spikesort(object):
             
             n_rows = np.ceil(len(klusters)/3.0);
         
-            wv_len = len(self.means[0])/4.
+            wv_len = len(self.means[0])/self.N
         
             for k in klusters:
                 
                 waveforms = self.clustered[k]['raw'];
                 
                 # Draw 100 random waveforms from cluster
-                # Check to be sure that cluster as more than 100 waveforms
+                # Check to be sure that cluster has more than 100 waveforms
                 if len(waveforms) < 100:
                     rand_wfs = waveforms;
                 else:
@@ -497,7 +523,7 @@ class Spikesort(object):
                         self.means[k][0+wv_len*ii:wv_len+wv_len*ii],
                         color = 'k', lw = 2);
                 
-                plt.title('cluster ' + str(k));
+                plt.title('cluster ' + str(k) + ', n = ' + str(len(waveforms)));
                             
             # Adjust the figure margins and plot spacing
             plt.subplots_adjust(left=0.07, right=0.97, top=0.94, bottom=0.06, \
@@ -804,6 +830,50 @@ class Spikesort(object):
         #self.autocorr(np.arange(len(self.cls)));
         #self.mean_spikes(np.arange(len(self.cls)));
         
+    def split(self, kluster):
+        ''' Splits a cluster into two clusters.  It takes the data in a cluster,
+        runs PCA on it again, then clusters it again.
+        '''
+        
+        cluster = self.clustered[kluster]
+        
+        # Get the spike waveforms and subtract the mean
+        spikes = cluster['waveforms']
+        spikes = spikes - np.mean(spikes, axis = 0)
+        
+        # Do some PCA on the spike waveforms
+        pca = PCA(n_components = 5)
+        pca_spikes = pca.fit(spikes).transform(spikes)
+        
+        # Now cluster!
+        gmm = mixture.GMM(n_components = 2)
+        
+        # Fit the GMM to the data
+        gmm.fit(pca_spikes);
+        
+        # If the model hasn't converged, keep training it
+        while gmm.converged_ == False:
+            gmm.fit(pca_spikes, init_params='');
+        
+        # Assign each data point to a Gaussian in the GMM
+        assign = gmm.predict(pca_spikes);
+        
+        # Create a list of the waveform indices belonging to each cluster
+        clusters = [ np.nonzero(assign == ii)[0] for ii in np.arange(2) ];
+        
+        new_clusters = [ { 'waveforms' : cluster['waveforms'][cl], 
+            'peaks' : cluster['peaks'][cl], 
+            'pca' : cluster['pca'][cl], 'raw': cluster['raw'][cl] } \
+            for cl in clusters ];
+        
+        # Now remove the cluster we are splitting
+        self.clustered.pop(kluster)
+        
+        # And add the two new clusters
+        self.clustered.extend(new_clusters)
+        
+        self.plot_clust()
+        
     def destroy(self, klusters):
         ''' Simply removes clusters.
         
@@ -826,7 +896,7 @@ class Spikesort(object):
         
         self.plot_clust(np.arange(len(self.clustered)));
         
-    def save_clusts(self, save_as):
+    def save_clusters(self, save_as):
         ''' Saves the tetrode waveforms and time stamps to a file for later
         analysis.  Load the file using pickle.
         
@@ -840,6 +910,37 @@ class Spikesort(object):
         pkl.dump(self.clustered, fil);
         
         fil.close();
+    
+    def load_clusters(self, filename):
+        ''' This is used to load already clustered data so you can look at it
+        or manipulate it if you want.
+        '''
+        
+        if not hasattr(self, 'clustered'):
+            self.clustered = []
+        
+        # Load the cluster data
+        fil = open(filename,'r')
+        loaded = pkl.load(fil)
+        fil.close()
+        
+        # Then add the data to the sorter
+        self.clustered.extend(loaded)
+        
+        self.N = len(self.clustered)
+    
+    def plot_drift(self, klusters):
+        
+        plt.figure(6)
+        
+        plt.clf()
+        
+        for k in klusters:
+            plt.scatter(self.clustered[k]['peaks'],
+                self.clustered[k]['pca'][:,0], marker = '.', linewidths = 3,
+                edgecolor = 'none', facecolor = self.colors[k])
+        
+        plt.show
         
       
 def jitter(peaks1, peaks2, jitter):
@@ -956,3 +1057,34 @@ def tetrode(num):
         4:[27,30,29,32]};
     
     return tetrodes[num]
+
+def trace_plot(data, ylim):
+    
+    clf()
+    plt.subplots_adjust(left=0.15);
+    
+    plt.subplot(411)
+    plt.plot(np.arange(0,30000*180)/30000., data[0][:30000*3*60])
+    plt.xticks(alpha = 0)
+    plt.yticks(fontsize = 'large')
+    plt.ylabel('Voltage (mV)', size = 'x-large')
+    plt.ylim(ylim)
+    
+    plt.subplot(412)
+    plt.plot(np.arange(0,30000*180)/30000.,data[1][:30000*3*60])
+    plt.yticks(alpha = 0)
+    plt.xticks(alpha = 0)
+    plt.ylim(ylim)
+    
+    plt.subplot(413)
+    plt.plot(np.arange(0,30000*180)/30000.,data[2][:30000*3*60])
+    plt.xticks(alpha = 0)
+    plt.yticks(alpha = 0)
+    plt.ylim(ylim)
+    
+    plt.subplot(414)
+    plt.plot(np.arange(0,30000*180)/30000., data[3][:30000*3*60])
+    plt.xlabel('Time (s)', size = 'x-large')
+    plt.xticks(fontsize = 'large')
+    plt.yticks(alpha = 0)
+    plt.ylim(ylim)
