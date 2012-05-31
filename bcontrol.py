@@ -615,8 +615,6 @@ def process_for_saving(bcdata):
     Modifies in place by the way.
     """
     
-    
-    
     for jj in np.arange(len(bcdata['peh'])):
         peh = bcdata['peh'][jj]
         pokes = peh.pokes
@@ -673,5 +671,5 @@ def process_for_saving(bcdata):
         
         bcdata['peh'][jj] = {'pokes':pokes_dict, 'states':states_dict }
     
-        return None
+    return None
     
