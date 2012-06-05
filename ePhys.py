@@ -83,10 +83,10 @@ class Spikesort(object):
         # Also save the data, filtered, but without subtracting the common mean.
         self.filt_chans = [ sig.filtfilt(b,a,ch)*8192.0/2.**16 for ch in self.raw_chans ]
         
-        if hasattr(self, 'clustered'):
-            del self.clustered
+        if hasattr(self, 'clusters'):
+            del self.clusters
         
-    def sort(self,threshold = 5,K = 8, dims = 4, to_plot = True, best_K = False):
+    def sort(self,threshold = 5,K = 8, dims = 4, to_plot = True, auto_K = False):
         ''' This method combines everything up to clustering. '''
         self.get_spikes(threshold);
         self.get_tetrodes();
@@ -97,7 +97,7 @@ class Spikesort(object):
             print 'PCA broke!  Ruh roh!'
             print 'Number of spikes = ' + str(len(self.tetrodes['waveforms']))
             
-        self.get_clusters(K, dims, to_plot, best_K);
+        self.get_clusters(K, dims, 'full', to_plot, auto_K);
         
     def get_spikes(self,threshold):
         """ This function returns 40 sample sections of the data that cross 
@@ -233,22 +233,22 @@ class Spikesort(object):
     
         """
         
-        if hasattr(self, 'clustered'):
+        if hasattr(self, 'clusters'):
             # This will not run the first time through
-            spikes = [ cluster['waveforms'] for cluster in self.clustered ];
+            spikes = [ cluster['waveforms'] for cluster in self.clusters ];
             spikes = np.concatenate(spikes);
             
-            peaks =  [ cluster['peaks'] for cluster in self.clustered ];
+            peaks =  [ cluster['peaks'] for cluster in self.clusters ];
             peaks = np.concatenate(peaks);
             
-            raw = [ cluster['raw'] for cluster in self.clustered ];
+            raw = [ cluster['raw'] for cluster in self.clusters ];
             raw = np.concatenate(raw);
             
             self.tetrodes['waveforms'] = spikes;
             self.tetrodes['peaks'] = peaks;
             self.tetrodes['raw'] = raw;
             
-            del self.clustered
+            del self.clusters
             
         else:
             spikes = self.tetrodes['waveforms']
@@ -267,7 +267,8 @@ class Spikesort(object):
             plt.plot(self.pca[:,0],self.pca[:,1],'ok',ms=1);
             plt.show()
     
-    def get_clusters(self,K = 5,dims = 4,to_plot=True,best_K = False):
+    def get_clusters(self, K = 6, dims = 5, covariance = 'full', 
+        to_plot=True, auto_K = False):
         """ This function clusters the spikes after decomposing the waveforms into 
         the PCA space.  Clustering is done using a Gaussian Mixture Model (GMM).
             
@@ -287,132 +288,89 @@ class Spikesort(object):
                 
         """
         
-        # Instantiate the GMM 
-        gmm = mixture.GMM(n_components = K);
-        
         # Create a vector of each waveform projected in PCA space
-        if hasattr(self, 'clustered'):
+        if hasattr(self, 'clusters'):
             # This will not run the first time through
-            pca = [ cluster['pca'] for cluster in self.clustered ];
-            pca = np.concatenate(pca);
-            waveforms = [ cluster['waveforms'] for cluster in self.clustered ];
-            waveforms = np.concatenate(waveforms);
-            raw = [ cluster['raw'] for cluster in self.clustered ];
-            raw = np.concatenate(raw);
-            peaks = [ cluster['peaks'] for cluster in self.clustered ];
-            peaks = np.concatenate(peaks);
+            pca = [ cluster['pca'] for cluster in self.clusters[1:] ]
+            pca = np.concatenate(pca)
+            waveforms = [ cluster['waveforms'] for cluster in self.clusters[1:] ]
+            waveforms = np.concatenate(waveforms)
+            raw = [ cluster['raw'] for cluster in self.clusters[1:] ]
+            raw = np.concatenate(raw)
+            peaks = [ cluster['peaks'] for cluster in self.clusters[1:] ]
+            peaks = np.concatenate(peaks)
+            noise = self.clusters[0]
         else:
             # This will run the first time through
-            pca = self.pca[:,:dims];
-            waveforms = self.tetrodes['waveforms'];
-            peaks = self.tetrodes['peaks'];
-            raw = self.tetrodes['raw'];
+            pca = self.pca[:,:dims]
+            waveforms = self.tetrodes['waveforms']
+            peaks = self.tetrodes['peaks']
+            raw = self.tetrodes['raw']
         
-        # Fit the GMM to the data
-        gmm.fit(pca);
         
-        # If the model hasn't converged, keep training it
-        while gmm.converged_ == False:
-            gmm.fit(pca, init_params='');
-            
-        #print 'Did the model converge? Answer: ' + str(gmm.converged_)
-        
-        k = K;
-        
-        clust_dict = { str(K) : gmm }
-         
-        # Find best number of Gaussians by finding the max log likelihood     
-        if (best_K == True) & (k <14):
-            # Get the log likelihood of the current model
-            loglike_K = sum(gmm.score(pca_vec))/len(pca_vec);
-            
-            # Start looking at more Gaussians in the model
-            direct = 'up'
-            
-            loglike_prev = loglike_K;
-            
-            k = k + 1;
-            
-            # This part goes up in number of Gaussians
-            while direct == 'up':
+        # This part will automatically find the best number of classes to use
+        # in the model.  
+        if auto_K == True:
+            # Only test from 4 to 14 units
+            for K in np.arange(4,14):
+                # Instantiate the GMM 
+                gmm = mixture.GMM(n_components = K, covariance_type = covariance, 
+                    init_params='')
                 
-                gmm = mixture.GMM(n_components = k);
+                # Fit the GMM to the data
+                gmm.fit(pca)
                 
-                gmm.fit(pca_vec);
-                
+                # If the model hasn't converged, keep training it
                 while gmm.converged_ == False:
-                    gmm.fit(pca_vec, init_params='')
-                    
-                loglike = sum(gmm.score(pca_vec))/len(pca_vec);
+                    gmm.fit(pca)
                 
-                #print 'Did the model converge? Answer: ' + str(gmm.converged_)
-                print 'The log-likelihood was ' +str(loglike)
-                print 'with ' + str(k) + ' clusters.'
-                
-                # If the current model fits better than the previous, keep going up.
-                if loglike > loglike_prev:
-                    clust_dict[str(k)] = gmm;
-                    k = k + 1;
-                    loglike_prev = loglike;
-                    
-                
-                # If the current model fits worse than the previous, and it is 
-                # the first step from K.
-                elif loglike < loglike_prev and loglike_prev == loglike_K :
-                    direct = 'down';
-                    k = K - 1;
-                    loglike_prev = loglike_K;
-                
-                # Otherwise, this is the max log likelihood, so proceed.
+                # We need to save the bic value from the previous model so we
+                # can find the best model
+                if 'prev_bic' not in locals():
+                    prev_bic = gmm.bic(pca)
+                elif gmm.bic(pca) > prev_bic:
+                    break
                 else:
-                    direct = 'done';
-                    k = k - 1;
+                    prev_bic = gmm.bic(pca)
+        else:
+            # Instantiate the GMM 
+            gmm = mixture.GMM(n_components = K, covariance_type = covariance, 
+                init_params='')
             
-            # This part goes down in number of Gaussians
-            while direct == 'down':
-                
-                gmm = mixture.GMM(n_states = k);
-                
-                gmm.fit(pca_vec);
-                
-                while gmm.converged_ == False:
-                    gmm.fit(pca_vec, init_params='')
-                    
-                loglike = sum(gmm.score(pca_vec))/len(pca_vec);
-                
-                #print 'Did the model converge? Answer: ' + str(gmm.converged_)
-                print 'The log-likelihood was ' +str(loglike)
-                print 'with ' + str(k) + ' clusters.'
-                
-                # If the current model fits better than previous, keep going down.
-                if loglike > loglike_prev:
-                    clust_dict[str(k)] = gmm;
-                    loglike_prev = loglike;
-                    k = k - 1;
-                    
-                # Otherwise, this is the max log likelihood, so proceed.
-                else:
-                    direct = 'done';
-                    k = k + 1;
-                    
+            # Fit the GMM to the data
+            gmm.fit(pca)
+            
+            # If the model hasn't converged, keep training it
+            while gmm.converged_ == False:
+                gmm.fit(pca)
+        
+        
+        # Store the model after fitting
+        self.model = gmm
         
         # Assign each data point to a Gaussian in the GMM
-        assign = clust_dict[str(k)].predict(pca);
+        assign = gmm.predict(pca);
         
         # Create a list of the waveform indices belonging to each cluster
-        clusters = [ np.nonzero(assign == ii)[0] for ii in np.arange(k) ];
+        clusters = [ np.nonzero(assign == ii)[0] for ii in np.arange(K) ];
         
         # create a list of dictionaries, each dictionary is one cluster, separated
         # into 'waveforms' and 'peaks', which are the tetrode  voltage waveforms
         # and peak times respectively.
-        self.clustered = [ { 'waveforms' : waveforms[cl], 'peaks' : peaks[cl], \
-            'pca' : pca[cl], 'raw': raw[cl] } for cl in clusters ];
+        self.clusters = [ { 'waveforms' : waveforms[cl], 'peaks' : peaks[cl], \
+            'pca' : pca[cl], 'raw': raw[cl]} for cl in clusters ];
         
-        self.colors = plt.cm.Paired(np.arange(0.0,1.0,1.0/k));
+        # Let's add in a cluster just for noise and artifacts 
+        self.clusters.insert(0, { 'waveforms' : 0, 'peaks' : 0, \
+                'pca' : 0, 'raw': 0 })
+        
+        if 'noise' in locals():
+            self.clusters[0] = noise
+
         
         if to_plot == True:
             
-            self.plot_clust(np.arange(k).tolist());
+            self.plot_clust(np.arange(1,len(self.clusters)));
             
 
     def plot_clust(self, klusters = None):
@@ -424,14 +382,15 @@ class Spikesort(object):
         """
         
         if klusters == None:
-            klusters = np.arange(len(self.clustered));
+            klusters = np.arange(1,len(self.clusters));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist();
         
-        K = len(self.clustered);
+        K = len(self.clusters);
         
-        self.colors = plt.cm.Paired(np.arange(0.0,1.0,1.0/K));
+        # Set the colors for all the plots based on the number of clusters
+        self.colors = plt.cm.Paired(np.arange(0.0,1.0,1.0/K))
         
         plt.figure(1);
         plt.clf();
@@ -439,7 +398,7 @@ class Spikesort(object):
         
         for k in klusters:
         
-            pca = self.clustered[k]['pca']
+            pca = self.clusters[k]['pca']
         
             # Plot clusters on PCA components 1 & 2
             plt.subplot(131);
@@ -469,8 +428,8 @@ class Spikesort(object):
         
         plt.show();
         
-        self.mean_spikes()
-        self.autocorr()
+        self.mean_spikes(klusters)
+        self.autocorr(klusters)
         
         
     def mean_spikes(self, klusters = None, to_plot = True):
@@ -484,13 +443,12 @@ class Spikesort(object):
         """
         
         if klusters == None:
-            klusters = np.arange(len(self.clustered));
+            klusters = np.arange(len(self.clusters));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist();
         
-        self.means = [ np.mean(self.clustered[k]['raw'],axis=0) \
-            for k in klusters ];
+        self.means = [ np.mean(clst['raw'],axis=0) for clst in self.clusters ]
         
         if to_plot == True:
             
@@ -499,11 +457,11 @@ class Spikesort(object):
             
             n_rows = np.ceil(len(klusters)/3.0);
         
-            wv_len = len(self.means[0])/self.N
+            wv_len = len(self.means[1])/self.N
         
             for k in klusters:
                 
-                waveforms = self.clustered[k]['raw'];
+                waveforms = self.clusters[k]['raw'];
                 
                 # Draw 100 random waveforms from cluster
                 # Check to be sure that cluster has more than 100 waveforms
@@ -551,7 +509,7 @@ class Spikesort(object):
     
         for k in klusters:
         
-            peaks = self.clustered[k]['peaks'];
+            peaks = self.clusters[k]['peaks'];
             
             # This finds the difference between each peak pair
             diff_peaks = [j-i for i, j in zip(peaks[:-1], peaks[1:])];
@@ -590,7 +548,7 @@ class Spikesort(object):
         """
         
         if klusters == None:
-            klusters = np.arange(len(self.clustered));
+            klusters = np.arange(len(self.clusters));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist()
@@ -607,47 +565,49 @@ class Spikesort(object):
         
         for k in klusters:
             
-            peaks = self.clustered[k]['peaks'];
+            peaks = self.clusters[k]['peaks'];
         
             # Get the bins and the events in each bin.
-            correl = correlogram(peaks, bin_width = bin_width, limit = range, auto = 1);
+            correl = correlogram(peaks, bin_width = bin_width, 
+                limit = range, auto = 1);
         
             # This is the average (expected) number of events in each bin
-            lam = np.ceil(sum(correl[0])/(len(correl[1])-1));
+            #lam = np.ceil(sum(correl[0])/(len(correl[1])-1));
         
             # These functions calculate the cumulative distribution function (cdf)
             # for a Poisson process, shifted by 99% or 1% for finding the zero.
             # The cdf says, what is the probability that I will see k
-            ucdf = lambda k: 0.99 - spec.gammaincc(np.floor(k+1),lam);
-            lcdf = lambda k: spec.gammaincc(np.floor(k+1),lam) - 0.01;
+            #ucdf = lambda k: 0.99 - spec.gammaincc(np.floor(k+1),lam);
+            #lcdf = lambda k: spec.gammaincc(np.floor(k+1),lam) - 0.01;
             
             # Find the smallest number of events under 99% of the
             # cdf of the Poisson distribution
-            try:
-                u99 = np.floor(opt.brentq(ucdf,lam,lam+3*np.sqrt(lam)));
-            except:
-                u99 = lam + 2*np.sqrt(lam);
+            #~ try:
+                #~ u99 = np.floor(opt.brentq(ucdf,lam,lam+3*np.sqrt(lam)));
+            #~ except:
+                #~ u99 = lam + 2*np.sqrt(lam);
                 #print 'expected events = ' + str(lam)
         
             # Find the largest number of events above 1% of the
             # cdf of the Poisson distribution
-            try:
-                u01 = np.ceil(opt.brentq(lcdf,a=0,b=lam));
-            except: 
-                u01 = 0.0;
+            #~ try:
+                #~ u01 = np.ceil(opt.brentq(lcdf,a=0,b=lam));
+            #~ except: 
+                #~ u01 = 0.0;
                 #print 'expected events = ' + str(lam)
         
             # Set out the numbering for the subplots. 
             plt.subplot(n_rows, n_cols, klusters.index(k)  + 1);
             
             # Plot the correlogram
-            plt.bar(correl[1][:-1]*1000,correl[0],width = bin_width*1000,color = self.colors[k]);
+            plt.bar(correl[1][:-1]*1000,correl[0], width = bin_width*1000, 
+                color = self.colors[k], edgecolor = 'none');
         
             # Plot the 99% Poisson probability
-            plt.plot(correl[1],u99*np.ones(len(correl[1])), '--', color = 'gray', lw = 2);
+            #plt.plot(correl[1],u99*np.ones(len(correl[1])), '--', color = 'gray', lw = 2);
         
             # Plot the 1% Poisson probability
-            plt.plot(correl[1],u01*np.ones(len(correl[1])), '--', color = 'gray', lw = 2);
+            #plt.plot(correl[1],u01*np.ones(len(correl[1])), '--', color = 'gray', lw = 2);
         
             # If the peak times are drawn from a Poisson distribution, then events in each
             # bin has 98% probability of falling between these two lines.  If you see bins
@@ -680,7 +640,7 @@ class Spikesort(object):
         """
         
         if klusters == None:
-            klusters = np.arange(len(self.clustered));
+            klusters = np.arange(len(self.clusters));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist()
@@ -694,7 +654,7 @@ class Spikesort(object):
         n_cols = len(klusters);
         
         # Get the clusters used in the correlograms
-        clusts = [self.clustered[k]['peaks'] for k in klusters];
+        clusts = [self.clusters[k]['peaks'] for k in klusters];
         
         # Build a list used to iterate through all the correlograms
         l_rows = np.arange(n_rows+1)
@@ -757,7 +717,8 @@ class Spikesort(object):
             
             if auto:
                 # Plot the auto-correlogram
-                plt.bar(correl[1][:-1],correl[0],width = 0.001, color = self.colors[l]);
+                plt.bar(correl[1][:-1],correl[0],width = 0.001, color = self.colors[l], 
+                    edgecolor = 'none');
             else:
                 # Plot the cross-correlogram
                 plt.bar(correl[1][:-1],correl[0],width = 0.001, color = 'k');
@@ -808,14 +769,14 @@ class Spikesort(object):
         # clusters.
         klusters.sort(reverse=True);
         
-        keys = self.clustered[0].keys();
+        keys = self.clusters[0].keys();
         
         comb = dict().fromkeys(keys);
         
         # For each cluster, remove the desired cluster and add it to the
         # concatenated cluster
         for k in klusters:
-            x = self.clustered.pop(k);
+            x = self.clusters.pop(k);
             for key in x.iterkeys():
                 if comb[key] == None:
                     comb[key] = x[key];
@@ -823,10 +784,10 @@ class Spikesort(object):
                     comb[key]=np.concatenate((comb[key],x[key]));
     
         # Add concatenated dictionary back to clustered data
-        self.clustered.append(comb);
+        self.clusters.append(comb);
             
         # And replot
-        self.plot_clust(np.arange(len(self.clustered)));
+        self.plot_clust(np.arange(len(self.clusters)));
         #self.autocorr(np.arange(len(self.cls)));
         #self.mean_spikes(np.arange(len(self.cls)));
         
@@ -835,7 +796,7 @@ class Spikesort(object):
         runs PCA on it again, then clusters it again.
         '''
         
-        cluster = self.clustered[kluster]
+        cluster = self.clusters[kluster]
         
         # Get the spike waveforms and subtract the mean
         spikes = cluster['waveforms']
@@ -867,15 +828,15 @@ class Spikesort(object):
             for cl in clusters ];
         
         # Now remove the cluster we are splitting
-        self.clustered.pop(kluster)
+        self.clusters.pop(kluster)
         
         # And add the two new clusters
-        self.clustered.extend(new_clusters)
+        self.clusters.extend(new_clusters)
         
         self.plot_clust()
         
-    def destroy(self, klusters):
-        ''' Simply removes clusters.
+    def remove(self, klusters):
+        ''' Adds a cluster to the noise cluster.
         
         Arguments:
         
@@ -892,9 +853,9 @@ class Spikesort(object):
     
         # Remove the desired clusters
         for k in klusters:
-            self.clustered.pop(k);
+            self.clusters[0].update(self.clusters.pop(k))
         
-        self.plot_clust(np.arange(len(self.clustered)));
+        self.plot_clust(np.arange(1, len(self.clusters)));
         
     def save_clusters(self, save_as):
         ''' Saves the tetrode waveforms and time stamps to a file for later
@@ -907,7 +868,7 @@ class Spikesort(object):
         
         fil = open(save_as + '.dat', 'w');
         
-        pkl.dump(self.clustered, fil);
+        pkl.dump(self.clusters, fil);
         
         fil.close();
     
@@ -916,8 +877,8 @@ class Spikesort(object):
         or manipulate it if you want.
         '''
         
-        if not hasattr(self, 'clustered'):
-            self.clustered = []
+        if not hasattr(self, 'clusters'):
+            self.clusters = []
         
         # Load the cluster data
         fil = open(filename,'r')
@@ -925,24 +886,69 @@ class Spikesort(object):
         fil.close()
         
         # Then add the data to the sorter
-        self.clustered.extend(loaded)
+        self.clusters.extend(loaded)
         
-        self.N = len(self.clustered)
+        self.N = len(self.clusters)
     
     def plot_drift(self, klusters):
+        ''' This method plots the drift of a cluster over time.'''
         
         plt.figure(6)
         
         plt.clf()
         
         for k in klusters:
-            plt.scatter(self.clustered[k]['peaks'],
-                self.clustered[k]['pca'][:,0], marker = '.', linewidths = 3,
+            plt.scatter(self.clusters[k]['peaks'],
+                self.clusters[k]['pca'][:,0], marker = '.', linewidths = 3,
                 edgecolor = 'none', facecolor = self.colors[k])
         
         plt.show
+    
+    def outliers(self):
+        ''' This method is going to detect and remove outliers from each cluster.
         
-      
+        Outlier removal is done following the method in Hill D.N., et al., 2011
+        
+        '''
+        # Make sure the model has the correct information about our
+        # non-noise clusters
+        
+        assert len(self.model.means_) == (len(self.clusters) - 1), \
+            'Number of classes in the model not equal to number \
+            of non-noise units.  Please re-cluster and try again'
+        
+        
+        # Find the outliers for each cluster except the noise cluster        
+        for ii, clst in enumerate(self.clusters[1:]):
+            
+            # Get the mean and the covariance matrix for the cluster
+            mean = self.model.means_[ii]
+            if np.shape(np.shape(self.model.covars_[ii])) == 1:
+                cov = np.diag(self.model.covars_[ii])
+            else:
+                cov =self.model.covars_[ii]
+            
+            diff = np.matrix(clst['pca'] - mean)
+            invcov = np.matrix(np.linalg.inv(cov))
+            
+            # Calculate the chi^2 values for each data point
+            chi2 = np.array([ (vec*invcov*vec.T).A[0,0] for vec in diff ])
+            
+            # Find outliers and inliers
+            outliers = np.nonzero(chi2 < 1/len(diff))[0]
+            inliers = np.nonzero(chi2 > 1/len(diff))[0]
+            
+            for key, values in clst.iteritems():
+                # Save outliers to noise cluster
+                np.concatenate((self.clusters[0][key], values[outliers]))
+                
+                # Save only the inliers
+                clst[key] = values[inliers]
+        
+        self.plot_clust(np.arange(1,len(self.clusters)))
+
+
+
 def jitter(peaks1, peaks2, jitter):
     
     jit1 = 0.001*np.random.randint(-jitter, jitter+1, (10,len(peaks1)));
