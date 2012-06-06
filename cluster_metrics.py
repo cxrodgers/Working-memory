@@ -26,8 +26,6 @@ def load_spikes(features_file, clusters_file, samp_rate):
     # Get spike cluster labels
     clusters = kkpandas.read_clufile(clusters_file)
     
-    assert isinstance(list, type)
-    
     # Cluster numbers
     cluster_nums = np.unique(clusters.values)
     
