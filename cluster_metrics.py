@@ -16,7 +16,7 @@ def load_spikes(features_file, clusters_file, samp_rate):
     Arguments:
     features_file : string path to the features file in KlustaKwik format
     clusters_file : string path to the clusters file in KlustaKwik format
-    samp_rate : the sampling rate of the recording
+    samp_rate : the sampling rate of the recording in samples per second
     '''
 
     # Get spike times
@@ -24,22 +24,22 @@ def load_spikes(features_file, clusters_file, samp_rate):
     spike_times = features.spike_time.values
     
     # Get spike cluster labels
-    clusters = kkpandas.read_clufile(clusters_file)
+    clu = kkpandas.read_clufile(clusters_file)
     
     # Cluster numbers
-    cluster_nums = np.unique(clusters.values)
+    cluster_nums = np.unique(clu.values)
     
     # I think the KlustaKwik format is annoying...
     
     # Grouping the indices by cluster
-    cluster_ind = [ np.nonzero(clusters.values == n)[0] for n in cluster_nums ]
+    cluster_ind = [ np.nonzero(clu.values == n)[0] for n in cluster_nums ]
     
-    # Get the spikes for each cluster
-    cluster_spikes = [ spike_times[ind]/np.float(samp_rate) for ind in cluster_ind ]
+    # Get the spike times for each cluster
+    cluster_times = [ spike_times[ind]/np.float(samp_rate) for ind in cluster_ind ]
     
     # Make a dictionary where each key is the cluster number and the value
     # is an array of the spike times in that cluster
-    clusters = dict(zip(cluster_nums, cluster_spikes)) 
+    clusters = dict(zip(cluster_nums, cluster_times)) 
     
     # Let's make sure the spike times for each cluster is sorted correctly
     for spikes in clusters.itervalues():
