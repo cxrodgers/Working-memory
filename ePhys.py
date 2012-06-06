@@ -86,7 +86,7 @@ class Spikesort(object):
         if hasattr(self, 'clusters'):
             del self.clusters
         
-    def sort(self,threshold = 5,K = 8, dims = 4, to_plot = True, auto_K = False):
+    def sort(self,threshold = 5,K = 8, dims = 5, to_plot = True, auto_K = True):
         ''' This method combines everything up to clustering. '''
         self.get_spikes(threshold);
         self.get_tetrodes();
@@ -329,9 +329,26 @@ class Spikesort(object):
                 if 'prev_bic' not in locals():
                     prev_bic = gmm.bic(pca)
                 elif gmm.bic(pca) > prev_bic:
+                    # If the current number of classes (K) produces a worse model than
+                    # the previous model, cluster with K-1 classes and stop
+                    
+                    K = K - 1
+                    
+                    gmm = mixture.GMM(n_components = K, covariance_type = covariance, 
+                    init_params='')
+                
+                    # Fit the GMM to the data
+                    gmm.fit(pca)
+                    
+                    # If the model hasn't converged, keep training it
+                    while gmm.converged_ == False:
+                        gmm.fit(pca)
+                    
                     break
                 else:
                     prev_bic = gmm.bic(pca)
+                    
+                
         else:
             # Instantiate the GMM 
             gmm = mixture.GMM(n_components = K, covariance_type = covariance, 
@@ -366,7 +383,6 @@ class Spikesort(object):
         
         if 'noise' in locals():
             self.clusters[0] = noise
-
         
         if to_plot == True:
             
@@ -450,13 +466,19 @@ class Spikesort(object):
         
         self.means = [ np.mean(clst['raw'],axis=0) for clst in self.clusters ]
         
+        # Check for nans and set them to 0
+        nans = np.nonzero([ np.isnan(means).all() for means in self.means ])[0]
+        for ii in nans:
+            self.means[ii] = np.zeros(np.shape(self.means[ii]))
+        
+        
         if to_plot == True:
             
             plt.figure(2);
             plt.clf();
             
             n_rows = np.ceil(len(klusters)/3.0);
-        
+            
             wv_len = len(self.means[1])/self.N
         
             for k in klusters:
@@ -473,7 +495,6 @@ class Spikesort(object):
                 plt.subplot(n_rows, 3, klusters.index(k) + 1);
                 
                 for ii in np.arange(self.N):
-                    
                     plt.plot(np.arange(5, wv_len + 5)+(wv_len+10)*ii,
                         rand_wfs[:,0+wv_len*ii:wv_len+wv_len*ii].T, 
                         color = self.colors[k], lw = 2, alpha = 0.2);
@@ -909,26 +930,15 @@ class Spikesort(object):
         
         Outlier removal is done following the method in Hill D.N., et al., 2011
         
-        '''
-        # Make sure the model has the correct information about our
-        # non-noise clusters
-        
-        assert len(self.model.means_) == (len(self.clusters) - 1), \
-            'Number of classes in the model not equal to number \
-            of non-noise units.  Please re-cluster and try again'
-        
+        '''     
         
         # Find the outliers for each cluster except the noise cluster        
         for ii, clst in enumerate(self.clusters[1:]):
             
-            # Get the mean and the covariance matrix for the cluster
-            mean = self.model.means_[ii]
-            if np.shape(np.shape(self.model.covars_[ii])) == 1:
-                cov = np.diag(self.model.covars_[ii])
-            else:
-                cov =self.model.covars_[ii]
+            mean = self.means[ii]
+            cov = np.matrix(np.cov(clst['raw'].T))
             
-            diff = np.matrix(clst['pca'] - mean)
+            diff = np.matrix(clst['raw'] - mean)
             invcov = np.matrix(np.linalg.inv(cov))
             
             # Calculate the chi^2 values for each data point
