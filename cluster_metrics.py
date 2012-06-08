@@ -2,7 +2,7 @@
 quality of clustered data.
 
 Author:  Mat Leonard
-Last modified: 6/5/2012
+Last modified: 6/6/2012
 """
 
 import numpy as np
@@ -10,11 +10,12 @@ import kkpandas
 from scipy import optimize as opt
 from sklearn import mixture
 from itertools import combinations
-from itertools import permutations
 
 def load_spikes(features_file, clusters_file, samp_rate):
     ''' This function takes the feature and cluster files in KlustaKwik format 
-    and pulls out the spike times for each cluster.
+    and pulls out the features and spike times for each cluster.
+    
+    Will extend this to load spike waveforms eventually.
     
     Arguments:
     features_file : string path to the features file in KlustaKwik format
@@ -47,7 +48,7 @@ def load_spikes(features_file, clusters_file, samp_rate):
     clustered_times = dict(zip(cluster_nums, times))
     
     # Make a dictionary where each key is the cluster number and the value
-    # is an array of the spike times in that cluster
+    # is an array of the features in that cluster
     clustered_features = dict(zip(cluster_nums, feats))
     
     # Let's make sure the spike times for each cluster are sorted correctly
@@ -102,7 +103,7 @@ def false_neg(waveforms):
     
     # We need to get a histogram of the spike heights
     
-def overlap(clustered_features, noise = True):
+def overlap(clustered_features, ignore = [0]):
     ''' Okay, so we are going to calculate the false positives and negatives
     due to overlap between clusters.
     
@@ -111,10 +112,12 @@ def overlap(clustered_features, noise = True):
     fitting a gaussian mixture model with two classes to each cluster
     pair.  Then the false positives and negatives between those two clusters
     are calculated.  If you have very non-gaussian shaped clusters, this 
-    probably won't work very well.  
+    probably won't work very well.  The work around will be to ignore these
+    bad clusters.
     
     Arguments:
-    noise: True if the first cluster is a noise cluster 
+    ignore: a list of the clusters to ignore in the analysis.  Default is cluster
+    zero since that is typically the noise cluster.
     '''
     
     c_feat = clustered_features
@@ -129,9 +132,12 @@ def overlap(clustered_features, noise = True):
     # Make a dictionary to store the false negatives
     f_n = dict.fromkeys(c_feat.keys())
     
+    keys = c_feat.keys()
+    [ keys.pop(keys.index(ig)) for ig in ignore ]
+    
     # We're going to need to fit models to all pairwise combinations
     # If the first cluster is a noise cluster, ignore it
-    comb_pairs = combinations(c_feat.keys()[int(noise):], 2)
+    comb_pairs = combinations(keys, 2)
     
     # Fit the models, two clusters at a time
     for clst_1, clst_2 in comb_pairs:
@@ -149,18 +155,27 @@ def overlap(clustered_features, noise = True):
         while gmm.converged_ == False:
             gmm.fit(data_vecs)
         
-        # Now we will calculate the false positives and negatives for each cluster
+        # Calculate the false positives and negatives for each cluster
+        # For each pair, there is one model, but four values we can get
         k = clst_1
         i = clst_2
-        
-        # For each pair, there is one model, but four values we can get
         N_k = np.float(len(c_feat[k]))
         N_i = np.float(len(c_feat[i]))
-            
+        
+        # This calculates the average probability (over k) that a spike in 
+        # cluster k belongs to cluster i - false positives
         f_p_k_i = 1/N_k*np.min(np.sum(gmm.predict_proba(c_feat[k]), axis=0))
+        
+        # This calculates the average probability (over k)  that a spike in 
+        # cluster i belongs to cluster k - false negatives
         f_n_k_i = 1/N_k*np.min(np.sum(gmm.predict_proba(c_feat[i]), axis=0))
         
+        # This calculates the average probability (over i) that a spike in 
+        # cluster i belongs to cluster k - false positives
         f_p_i_k = 1/N_i*np.min(np.sum(gmm.predict_proba(c_feat[i]), axis=0))
+        
+        # This calculates the average probability (over i) that a spike in 
+        # cluster k belongs to cluster i - false negatives
         f_n_i_k = 1/N_i*np.min(np.sum(gmm.predict_proba(c_feat[k]), axis=0))
         
         # Now store these values
@@ -184,26 +199,11 @@ def overlap(clustered_features, noise = True):
             f_n[i] = [f_n_i_k]
         else:
             f_n[i].append(f_n_i_k)
-        
-    #1/0
     
+    # Sum over all values from pairs of clusters
     for clst in f_p.iterkeys():
         f_p[clst] = np.sum(f_p[clst])
         f_n[clst] = np.sum(f_n[clst])
         
     return f_p, f_n
-        
-        
-   
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
         
