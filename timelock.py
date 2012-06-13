@@ -1,5 +1,5 @@
 """ Okay, this one is going to take the behavior and neural data then generate
-timelocked raster plots and peths (post stimulus time histograms).  Maybe I
+timelocked raster plots and peths (peri-event time histograms).  Maybe I
 should actually call them Pre Response Time Histograms.  I'll figure it out.
 """
 
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import scipy.io
 from scipy.stats.mstats import zscore
 
-def timelock_RS(datadir, n_shift = 0, norm = None):
+def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     """ This function takes the behavior and spiking data, then returns
     the spikes timelocked to the 'Response,' when the stimulus plays.
     
@@ -20,16 +20,22 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
         The necessary data files are behavior, clusters, syncing, and onsets from
         the recording data.
     
+    time_zero : The event that you timelock to, where you set t = 0.
+        'RS' sets it to the response, defined as the time when the stimulus plays
+        'PG' sets it to the previous goal, defined as the time when the rat
+            poked his nose in the previous port
+        'FG' sets it to the future goal, defined as the time when the rat pokes
+            his nose in the next port
     n_shift : Sometimes the data will be split into multiple files.  If this happens,
     this parameter will shift everything forward trial to trial number n_shift.
-    """
     
+    scaled : True if you want the spikes to be scaled so each trial is the same length
+    
+    A typical use would be "trials, spikes = timelock('/path/to/data')"
+    """
     
     # First we need to import the behavior and neural data, also the syncing
     # information.
-
-    # The path to where the data is stored.
-    #datadir = '/home/mat/Dropbox/Data/'
 
     # Get list of files in datadir
     filelist = os.listdir(datadir);
@@ -39,11 +45,12 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
     # So build a list of all the files and pull out relevant info.  
     reg = [ re.search('(\w+)_(\w+)_(\w+)_(\w+).dat',fname) for fname in filelist];
 
-    
     # Okay, lets get all the different datafiles into a structure we can use.
+    # Initialize the data dictionary.
+    data_dict = dict((('clusters',None), ('onsets',None), ('sync',None), 
+        ('behave',None)));
 
-    data_dict = dict((('clusters',None),('onsets',None),('sync',None),('behave',None)));
-
+    # Populate the dictionary with our timing, behavior, and spiking information
     for ii in np.arange(len(reg)):
         if reg[ii] != None:
             if reg[ii].group(1) == 'clusters':
@@ -82,7 +89,7 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
 
     #~ Probably more, I'll list more as I think of them
 
-
+    
     # Get the stimulus onset for each trial
     b_onsets = data_dict['behave']['onsets'];
     consts = data_dict['behave']['CONSTS'];
@@ -90,7 +97,7 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
     # Create a structured array to keep all the relevant trial information
     records = [('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'), \
         ('2PG outcome', 'i8'), ('PG outcome','i8'), ('FG outcome','i8'), \
-        ('PG time','f8'), ('RS time', 'i8'), ('FG time', 'f8'), \
+        ('PG time','f8'), ('RS time', 'f8'), ('FG time', 'f8'), \
         ('PG response','i8'), ('Response','i8'), ('Trial length', 'f8'), \
         ('Block', 'i8'), ('Scale', 'f8', 2)];
 
@@ -102,6 +109,7 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
     trials['2PG port'] = np.concatenate((np.zeros(2), \
         data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)-2]));
     
+    # Correct port for the previous goal
     trials['PG port'] = np.concatenate((np.array((0,)), \
         data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)-1]));
 
@@ -124,26 +132,23 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
     
     # What direction did the rat go (left = 1, right = 2)
     for ii in np.arange(len(b_onsets)):
+        # If the trial was a hit, then the rat went to the correct port for that trial
         if trials['FG outcome'][ii] == consts['HIT']:
             trials['Response'][ii] = trials['FG port'][ii]
+        # If it was an error, the went to the other port
         elif trials['FG outcome'][ii] == consts['ERROR']:
             if trials['FG port'][ii] == consts['LEFT']:
                 trials['Response'][ii] = consts['RIGHT']
             elif trials['FG port'][ii] == consts['RIGHT']:
                 trials['Response'][ii] = consts['LEFT']
     
+    # PG response is just FG response shifted by one trial
     trials['PG response'] = np.concatenate((np.array((0,)),trials['Response'][:-1]));
     
+    # Initialize the scaling records, will be ones if not scaled at all
     trials['Scale'] = np.ones((len(trials),2));
     
-    # Now we need to get the times of previous and future goals.  I'm going to timelock
-    # to the stimulus, i.e. the response, so it will be relative to the onset time.
-    #
-    # Previous goal time is defined as when the rat pokes in a side port on the
-    # previous trial.
-    #
-    # Future goal time is defined as when the rat pokes in a side port on the current trial.
-    
+    # Now we'll get the event times relative to stimulus onset
     for ii in np.arange(len(b_onsets)):
         
         times = data_dict['behave']['peh'][ii];
@@ -161,10 +166,6 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
         else:
             pg_time = b_onsets[ii];
         
-        trials['PG time'][ii] = pg_time - b_onsets[ii];
-        
-        trials['RS time'][ii] = 0
-            
         # Now get the future goal times
         if trials['FG outcome'][ii] == consts['HIT']:
             fg_time = times['states']['hit_istate'].min();
@@ -173,26 +174,46 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
         elif trials['FG outcome'][ii] == consts['CHOICE_TIME_UP']:
             fg_time = times['states']['choice_time_up_istate'].min();
         
-        trials['FG time'][ii] = fg_time - b_onsets[ii];
+        if time_zero == 'RS':
+            # Time lock to the response, which I'm saying is when the 
+            # stimulus plays
+            trials['PG time'][ii] = pg_time - b_onsets[ii];
+            trials['RS time'][ii] = 0
+            trials['FG time'][ii] = fg_time - b_onsets[ii];
+            
+        elif time_zero == 'PG':
+            # Time lock to the previous goal, which I have set to the time 
+            # when the rat pokes in the port.  Might change this to when 
+            # the rat leaves the port.
+            trials['PG time'][ii] = 0
+            trials['RS time'][ii] = b_onsets[ii] - pg_time
+            trials['FG time'][ii] = fg_time - pg_time
+    
+        elif time_zero == 'FG':
+            # Time lock to the future goal, when the rat gets the future goal
+            trials['PG time'][ii] = pg_time - fg_time
+            trials['RS time'][ii] = b_onsets[ii] - fg_time
+            trials['FG time'][ii] = 0
         
         trials['Trial length'][ii] = fg_time - pg_time;
     
-    
     # Get the scaling factors
-    if norm == 'PG':
-        for jj in np.arange(len(trials)):
-            scale = -7./trials['PG time'][jj];
-            trials['Scale'][jj] = np.array((scale,1));
-    elif norm == 'FG':
-        for jj in np.arange(len(trials)):
-            scale = 1./trials['FG time'][jj];
-            trials['Scale'][jj] = np.array((1,scale));
-    elif norm == 'PG + FG':
-        for jj in np.arange(len(trials)):
-            scale_neg = -7./trials['PG time'][jj];
-            scale_pos = 1./trials['FG time'][jj];
-            trials['Scale'][jj] = np.array((scale_neg, scale_pos));
-            
+    if scaled:
+        if time_zero == 'RS':
+            for jj in np.arange(len(trials)):
+                scale_neg = -7./trials['PG time'][jj];
+                scale_pos = 1./trials['FG time'][jj];
+                trials['Scale'][jj] = np.array((scale_neg, scale_pos));
+        if time_zero == 'PG':
+            for jj in np.arange(len(trials)):
+                scale_neg = 7./trials['RS time'][jj];
+                scale_pos = 8./trials['FG time'][jj];
+                trials['Scale'][jj] = np.array((scale_neg, scale_pos));
+        if time_zero == 'FG':
+            for jj in np.arange(len(trials)):
+                scale_neg = -8./trials['PG time'][jj];
+                scale_pos = -1./trials['RS time'][jj];
+                trials['Scale'][jj] = np.array((scale_neg, scale_pos));
     
     
     # Okay, now get the spikes and time lock to the response, which we are
@@ -205,7 +226,7 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
     # skipped before the recording data starts.
     #n_shift = 24;
 
-    sync = data_dict['sync'].map_n_to_b;
+    sync = data_dict['sync'].map_n_to_b
 
     n_onsets = data_dict['onsets']/30000.
 
@@ -223,23 +244,63 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
             #~ shift = 0
         
         # Go through each trial and grab the spikes for that trial
+        # Need to subtract the first number in sync so everything lines up
         for ii in sync - sync[0]:
             
-            # Find the spikes between the PG and FG (plus 3 sec on both sides)
-            ind = (p_times > n_onsets[ii] + trials['PG time'][ii+n_shift] - 30.) & \
-                (p_times < n_onsets[ii] + trials['FG time'][ii+n_shift] + 30);
+            if time_zero == 'RS':
+                
+                # Grab spikes that are between the previous goal time - 30 sec
+                # and this trial's onset time
+                low_end = p_times > (n_onsets[ii] +
+                    trials['PG time'][ii+n_shift] - 30.)
+                    
+                # Grab spikes that are between the future goal time - 30 sec
+                # and this trial's onset time
+                high_end = p_times < (n_onsets[ii] +
+                    trials['FG time'][ii+n_shift] + 30.)
+                
+                ind = low_end & high_end
+                    
+                spikes[ii+n_shift] = p_times[ind]-n_onsets[ii];
+                spikes[ii+n_shift].sort();
             
-            spikes[ii+n_shift] = p_times[ind]-n_onsets[ii];
-            spikes[ii+n_shift].sort();
+            elif time_zero == 'PG':
+                
+                # Grab spikes that are between the previous goal time - 30 sec
+                # and this trial's onset time
+                low_end = p_times > (n_onsets[ii] -
+                    trials['RS time'][ii+n_shift] - 30.)
+                    
+                # Grab spikes that are between the future goal time - 30 sec
+                # and this trial's onset time
+                high_end = p_times < (n_onsets[ii] + trials['FG time'][ii+n_shift] -
+                    trials['RS time'][ii+n_shift] + 30.)
+                
+                ind = low_end & high_end
+                    
+                spikes[ii+n_shift] = (p_times[ind] - n_onsets[ii] + 
+                    trials['RS time'][ii+n_shift])
+                spikes[ii+n_shift].sort();
             
-        
-        if norm == 'PG':
-            for jj in np.arange(len(trials)):
-                spikes[jj] = trials['Scale'][jj][0] * spikes[jj];
-        elif norm == 'FG':
-            for jj in np.arange(len(trials)):
-                spikes[jj] = trials['Scale'][jj][1] * spikes[jj];
-        elif norm == 'PG + FG':
+            elif time_zero == 'FG':
+                # Grab spikes that are between the previous goal time - 30 sec
+                # and this trial's onset time
+                low_end = p_times > (n_onsets[ii] -
+                    trials['PG time'][ii+n_shift] - 30.)
+                    
+                # Grab spikes that are between the future goal time - 30 sec
+                # and this trial's onset time
+                high_end = p_times < (n_onsets[ii] - 
+                    trials['RS time'][ii+n_shift] + 30.)
+                
+                ind = low_end & high_end
+                    
+                spikes[ii+n_shift] = (p_times[ind] - n_onsets[ii] + 
+                    trials['RS time'][ii+n_shift])
+                spikes[ii+n_shift].sort()
+       
+        # Now we're going to scale the spike times
+        if scaled:
             for jj in np.arange(len(trials)):
                 try: 
                     spikes[jj][spikes[jj]<0] = trials['Scale'][jj][0] * spikes[jj][spikes[jj]<0];
@@ -252,23 +313,33 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
             
         trials_spikes.append(spikes[n_shift:])
     
-    
-    if norm == 'PG':
+    # Now scale event times
+    if scaled:
         for jj in np.arange(len(trials)):
-            if jj == 0:
-                trials['PG time'][jj] = 0;
-            else:
-                trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
-    elif norm == 'FG':
-        for jj in np.arange(len(trials)):
-            trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
-    elif norm == 'PG + FG':
-        for jj in np.arange(len(trials)):
-            if jj == 0:
-                trials['PG time'][jj] = 0;
-            else:
-                trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
-            trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
+            
+            if time_zero == 'RS':
+                if jj == 0:
+                    trials['PG time'][jj] = 0;
+                else:
+                    trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
+               
+                trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
+            
+            if time_zero == 'PG':
+                if jj == 0:
+                    trials['RS time'][jj] = 0;
+                else:
+                    trials['RS time'][jj] = trials['Scale'][jj][0] * trials['RS time'][jj];
+               
+                trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
+            
+            if time_zero == 'FG':
+                if jj == 0:
+                    trials['PG time'][jj] = 0;
+                else:
+                    trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
+               
+                trials['RS time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
      
     
     # Exclude trials longer than 20 seconds
@@ -280,529 +351,50 @@ def timelock_RS(datadir, n_shift = 0, norm = None):
        
     return trials[n_shift:], trials_spikes
     
-def timelock_PG(datadir, n_shift = 0, norm = None):
-    """ This function takes the behavior and spiking data, then returns
-    the spikes timelocked to the previous goal, when the rat gets the reward on the previous trial.
-    
-    Arguments:
-    datadir : path to the directory where the data files are stored.
-        The necessary data files are behavior, clusters, syncing, and onsets from
-        the recording data.
-    
-    n_shift : Sometimes the data will be split into multiple files.  If this happens,
-    this parameter will shift everything forward n_shift trials.
-    """
-    
-    # First we need to import the behavior and neural data, also the syncing
-    # information.
-
-    # The path to where the data is stored.
-    #datadir = '/home/mat/Dropbox/Data/'
-
-    # Get list of files in datadir
-    filelist = os.listdir(datadir);
-    filelist.sort();
-
-    # We need to be able to handle data across multiple data files.
-    # So build a list of all the files and pull out relevant info.  
-    reg = [ re.search('(\w+)_(\w+)_(\w+)_(\w+).dat',fname) for fname in filelist];
-
-    
-    # Okay, lets get all the different datafiles into a structure we can use.
-
-    data_dict = dict((('clusters',None),('onsets',None),('sync',None),('behave',None)));
-
-    for ii in np.arange(len(reg)):
-        if reg[ii] != None:
-            if reg[ii].group(1) == 'clusters':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['clusters'] = pkl.load(fin)
-                fin.close()
-            
-            elif reg[ii].group(1) == 'onsets':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['onsets'] = pkl.load(fin)
-                fin.close()
-        
-            elif reg[ii].group(1) == 'sync':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['sync'] = pkl.load(fin)
-                fin.close()
-            
-            elif reg[ii].group(1) == 'behave':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['behave'] = pkl.load(fin)
-                fin.close()
-            
-            rat = reg[ii].group(2);
-            date = reg[ii].group(3);
-
-    #~ Need to build a big list of each trial.  For each trial, here is what we need:
-       
-        #~ Previous goal (PG) port
-        #~ Future goal (FG) port
-        #~ Previous outcome
-        #~ Future outcome
-        #~ PG time
-        #~ FG time
-        #~ The rat's response (right or left)
-        #~ All the spikes PG time to FG time
-
-    #~ Probably more, I'll list more as I think of them
-
-
-    # Get the stimulus onset for each trial
-    b_onsets = data_dict['behave']['onsets']
-    consts = data_dict['behave']['CONSTS']
-
-    # Create a structured array to keep all the relevant trial information
-    records = [('PG port','i8'), ('FG port','i8'), ('PG outcome','i8'), \
-        ('FG outcome','i8'), ('RS time','f8'), ('FG time', 'f8'), \
-        ('PG response','i8'), ('Response','i8'), ('Trial length','f8'),\
-        ('Scale', 'f8', 2)];
-
-    trials = np.zeros((len(b_onsets),),dtype = records)
-
-    # Populate the array
-
-    # Correct port for the previous goal
-    trials['PG port'] = np.concatenate((np.array((0,)), \
-        data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)-1]));
-
-    # Correct port for the future goal
-    trials['FG port'] = data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)];
-
-    # Was the previous response a hit or an error
-    trials['PG outcome'] = np.concatenate((np.array((0,)), \
-        data_dict['behave']['TRIALS_INFO']['OUTCOME'][:len(b_onsets)-1]))
-
-    # Was the future response a hit or an error
-    trials['FG outcome'] = data_dict['behave']['TRIALS_INFO']['OUTCOME'][:len(b_onsets)]
-    
-    # What direction did the rat go (left = 1, right = 2)
-    for ii in np.arange(len(b_onsets)):
-        if trials['FG outcome'][ii] == consts['HIT']:
-            trials['Response'][ii] = trials['FG port'][ii]
-        elif trials['FG outcome'][ii] == consts['ERROR']:
-            if trials['FG port'][ii] == consts['LEFT']:
-                trials['Response'][ii] = consts['RIGHT']
-            elif trials['FG port'][ii] == consts['RIGHT']:
-                trials['Response'][ii] = consts['LEFT']
-    
-    trials['PG response'] = np.concatenate((np.array((0,)),trials['Response'][:-1]));
-    
-    # Now we need to get the times of previous and future goals.  I'm going to timelock
-    # to the stimulus, i.e. the response, so it will be relative to the onset time.
-
-    # Previous goal time is defined as when the rat pokes in a side port on the
-    # previous trial.
-
-    # Future goal time is defined as when the rat pokes in a side port on the current trial.
-    for ii in np.arange(len(b_onsets)):
-        
-        times = data_dict['behave']['peh'][ii];
-        
-        # Get previous goal times
-        if ii > 0:
-            prev_times = data_dict['behave']['peh'][ii-1];
-            
-            if trials['PG outcome'][ii] == consts['HIT']:
-                pg_time = prev_times['states']['hit_istate'].min();
-            elif trials['PG outcome'][ii] == consts['ERROR']:
-                pg_time = prev_times['states']['error_istate'].min();
-            elif trials['PG outcome'][ii] == consts['CHOICE_TIME_UP']:
-                pg_time = prev_times['states']['choice_time_up_istate'].min();
-        else:
-            pg_time = b_onsets[ii];
-        
-        
-        trials['RS time'][ii] = b_onsets[ii] - pg_time;
-            
-        # Now get the future goal times
-        if trials['FG outcome'][ii] == consts['HIT']:
-            fg_time = times['states']['hit_istate'].min();
-        elif trials['FG outcome'][ii] == consts['ERROR']:
-            fg_time = times['states']['error_istate'].min().min();
-        elif trials['FG outcome'][ii] == consts['CHOICE_TIME_UP']:
-            fg_time = times['states']['choice_time_up_istate'].min();
-        
-        trials['FG time'][ii] = fg_time - pg_time;
-        
-        trials['Trial length'][ii] = fg_time - pg_time;
-        
-    # Get the scaling factors
-    trials['Scale'] = np.ones((len(trials),2));
-    
-    if norm == 'RS':
-        for jj in np.arange(len(trials)):
-            scale = 7./trials['RS time'][jj];
-            trials['Scale'][jj] = np.array((scale,1));
-    elif norm == 'FG':
-        for jj in np.arange(len(trials)):
-            scale = 8./trials['FG time'][jj];
-            trials['Scale'][jj] = np.array((1,scale));
-    elif norm == 'RS + FG':
-        for jj in np.arange(len(trials)):
-            scale_neg = 7./trials['RS time'][jj];
-            scale_pos = 8./trials['FG time'][jj];
-            trials['Scale'][jj] = np.array((scale_neg, scale_pos));
-    
-    # Okay, now get the spikes and time lock to the response, which we are
-    # defining as the center poke, the stimulus onset.
-
-    # Let's first sync up the behavior trials and recording onsets
-
-    # If there were more than one neural data files, then you might have
-    # to shift things some.  Set this to the number of behavior trials 
-    # skipped before the recording data starts.
-    #n_shift = 24;
-
-    sync = data_dict['sync'].map_n_to_b;
-
-    n_onsets = data_dict['onsets']/30000.
-
-    trials_spikes = []
-
-    # Loop over each cluster in the ePhys data
-    for cl in data_dict['clusters']:
-        spikes = [0]*len(b_onsets);
-        
-        p_times = cl['peaks'];
-        
-        # Go through each trial and grab the spikes for that trial
-        for ii in sync:
-            
-            # Find the spikes between the PG and FG (plus 3 sec on both sides)
-            ind = (p_times > n_onsets[ii] - trials['RS time'][ii+n_shift] - 30.) & \
-                (p_times < n_onsets[ii] + trials['FG time'][ii+n_shift] - 
-                    trials['RS time'][ii+n_shift] + 30);
-            
-            spikes[ii+n_shift] = p_times[ind] - n_onsets[ii] + trials['RS time'][ii+n_shift];
-            spikes[ii+n_shift].sort();
-            
-        # This part scales the spike times
-        if norm == 'RS':
-            for jj in np.arange(len(trials)):
-                spikes[jj] = trials['Scale'][jj][0] * spikes[jj];
-        elif norm == 'FG':
-            for jj in np.arange(len(trials)):
-                spikes[jj] = trials['Scale'][jj][1] * spikes[jj];
-        elif norm == 'RS + FG':
-            for jj in np.arange(len(trials)):
-                try: 
-                    spikes[jj][spikes[jj]<7] = trials['Scale'][jj][0] * spikes[jj][spikes[jj]<7];
-                except:
-                    spikes[jj] = spikes[jj];
-                try:
-                    spikes[jj][spikes[jj]>7] = trials['Scale'][jj][1] * spikes[jj][spikes[jj]>7];
-                except:
-                    spikes[jj] = spikes[jj];
-                
-            
-        trials_spikes.append(spikes[n_shift:])
-    
-    # This part scales all the PG and FG times    
-    if norm == 'RS':
-        for jj in np.arange(len(trials)):
-            trials['RS time'][jj] = trials['Scale'][jj][0] * trials['RS time'][jj];
-    elif norm == 'FG':
-        for jj in np.arange(len(trials)):
-            trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
-    elif norm == 'RS + FG':
-        for jj in np.arange(len(trials)):
-            trials['RS time'][jj] = trials['Scale'][jj][0] * trials['RS time'][jj];
-            trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
-       
-    # Exclude trials longer than 30 seconds
-    #th = trials['Trial length'] < 30.
-    #trials = trials[th]
-    
-    #for x,spikes in enumerate(trials_spikes):
-    #    trials_spikes[x] = [ spikes[ii] for ii in np.nonzero(th)[0] ]
-    
-    return trials[n_shift:], trials_spikes
-
-def timelock_FG(datadir, n_shift = 0, norm = None):
-    """ This function takes the behavior and spiking data, then returns
-    the spikes timelocked to the previous goal, when the rat gets the reward on the previous trial.
-    
-    Arguments:
-    datadir : path to the directory where the data files are stored.
-        The necessary data files are behavior, clusters, syncing, and onsets from
-        the recording data.
-    
-    n_shift : Sometimes the data will be split into multiple files.  If this happens,
-    this parameter will shift everything forward n_shift trials.
-    """
-    
-    # First we need to import the behavior and neural data, also the syncing
-    # information.
-
-    # The path to where the data is stored.
-    #datadir = '/home/mat/Dropbox/Data/'
-
-    # Get list of files in datadir
-    filelist = os.listdir(datadir);
-    filelist.sort();
-
-    # We need to be able to handle data across multiple data files.
-    # So build a list of all the files and pull out relevant info.  
-    reg = [ re.search('(\w+)_(\w+)_(\w+)_(\w+).dat',fname) for fname in filelist];
-
-    
-    # Okay, lets get all the different datafiles into a structure we can use.
-
-    data_dict = dict((('clusters',None),('onsets',None),('sync',None),('behave',None)));
-
-    for ii in np.arange(len(reg)):
-        if reg[ii] != None:
-            if reg[ii].group(1) == 'clusters':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['clusters'] = pkl.load(fin)
-                fin.close()
-            
-            elif reg[ii].group(1) == 'onsets':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['onsets'] = pkl.load(fin)
-                fin.close()
-        
-            elif reg[ii].group(1) == 'sync':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['sync'] = pkl.load(fin)
-                fin.close()
-            
-            elif reg[ii].group(1) == 'behave':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['behave'] = pkl.load(fin)
-                fin.close()
-            
-            rat = reg[ii].group(2);
-            date = reg[ii].group(3);
-
-    #~ Need to build a big list of each trial.  For each trial, here is what we need:
-       
-        #~ Previous goal (PG) port
-        #~ Future goal (FG) port
-        #~ Previous outcome
-        #~ Future outcome
-        #~ PG time
-        #~ FG time
-        #~ The rat's response (right or left)
-        #~ All the spikes PG time to FG time
-
-    #~ Probably more, I'll list more as I think of them
-
-
-    # Get the stimulus onset for each trial
-    b_onsets = data_dict['behave']['onsets']
-    consts = data_dict['behave']['CONSTS']
-
-    # Create a structured array to keep all the relevant trial information
-    records = [('PG port','i8'), ('FG port','i8'), ('PG outcome','i8'), \
-        ('FG outcome','i8'), ('PG time','f8'), ('RS time', 'f8'), \
-        ('PG response','i8'), ('Response','i8'), ('Trial length', 'f8'),\
-        ('Scale', 'f8', 2)];
-
-    trials = np.zeros((len(b_onsets),),dtype = records)
-
-    # Populate the array
-
-    # Correct port for the previous goal
-    trials['PG port'] = np.concatenate((np.array((0,)), \
-        data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)-1]));
-
-    # Correct port for the future goal
-    trials['FG port'] = data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)];
-
-    # Was the previous response a hit or an error
-    trials['PG outcome'] = np.concatenate((np.array((0,)), \
-        data_dict['behave']['TRIALS_INFO']['OUTCOME'][:len(b_onsets)-1]))
-
-    # Was the future response a hit or an error
-    trials['FG outcome'] = data_dict['behave']['TRIALS_INFO']['OUTCOME'][:len(b_onsets)]
-    
-    # What direction did the rat go (left = 1, right = 2)
-    for ii in np.arange(len(b_onsets)):
-        if trials['FG outcome'][ii] == consts['HIT']:
-            trials['Response'][ii] = trials['FG port'][ii]
-        elif trials['FG outcome'][ii] == consts['ERROR']:
-            if trials['FG port'][ii] == consts['LEFT']:
-                trials['Response'][ii] = consts['RIGHT']
-            elif trials['FG port'][ii] == consts['RIGHT']:
-                trials['Response'][ii] = consts['LEFT']
-    
-    trials['PG response'] = np.concatenate((np.array((0,)),trials['Response'][:-1]));
-    
-    # Now we need to get the times of previous and future goals.  I'm going to timelock
-    # to the stimulus, i.e. the response, so it will be relative to the onset time.
-
-    # Previous goal time is defined as when the rat pokes in a side port on the
-    # previous trial.
-
-    # Future goal time is defined as when the rat pokes in a side port on the current trial.
-    for ii in np.arange(len(b_onsets)):
-        
-        times = data_dict['behave']['peh'][ii];
-        
-        # Now get the response times
-        if trials['FG outcome'][ii] == consts['HIT']:
-            fg_time = times['states']['hit_istate'].min();
-        elif trials['FG outcome'][ii] == consts['ERROR']:
-            fg_time = times['states']['error_istate'].min();
-        elif trials['FG outcome'][ii] == consts['CHOICE_TIME_UP']:
-            fg_time = times['states']['choice_time_up_istate'].min();
-        
-        trials['RS time'][ii] = b_onsets[ii] - fg_time;
-        
-        # Get previous goal times
-        if ii > 0:
-            prev_times = data_dict['behave']['peh'][ii-1];
-            
-            if trials['PG outcome'][ii] == consts['HIT']:
-                pg_time = prev_times['states']['hit_istate'].min();
-            elif trials['PG outcome'][ii] == consts['ERROR']:
-                pg_time = prev_times['states']['error_istate'].min();
-            elif trials['PG outcome'][ii] == consts['CHOICE_TIME_UP']:
-                pg_time = prev_times['states']['choice_time_up_istate'].min();
-        else:
-            pg_time = b_onsets[ii];
-            
-        
-        trials['PG time'][ii] = pg_time - fg_time;
-            
-        trials['Trial length'][ii] = fg_time - pg_time;
-        
-        
-    # Get the scaling factors
-    trials['Scale'] = np.ones((len(trials),2));
-    
-    if norm == 'PG':
-        for jj in np.arange(len(trials)):
-            scale = -8./trials['PG time'][jj];
-            trials['Scale'][jj] = np.array((scale,1));
-    elif norm == 'RS':
-        for jj in np.arange(len(trials)):
-            scale = -1./trials['RS time'][jj];
-            trials['Scale'][jj] = np.array((1,scale));
-    elif norm == 'PG + RS':
-        for jj in np.arange(len(trials)):
-            scale_neg = -8./trials['PG time'][jj];
-            scale_pos = -1./trials['RS time'][jj];
-            trials['Scale'][jj] = np.array((scale_neg, scale_pos));    
-    
-    
-    # Okay, now get the spikes and time lock to the response, which we are
-    # defining as the center poke, the stimulus onset.
-
-    # Let's first sync up the behavior trials and recording onsets
-
-    # If there were more than one neural data files, then you might have
-    # to shift things some.  Set this to the number of behavior trials 
-    # skipped before the recording data starts.
-    #n_shift = 24;
-
-    sync = data_dict['sync'].map_n_to_b;
-
-    n_onsets = data_dict['onsets']/30000.
-
-    trials_spikes = []
-
-    # Loop over each cluster in the ePhys data
-    for cl in data_dict['clusters']:
-        spikes = [0]*len(b_onsets);
-        
-        p_times = cl['peaks'];
-        
-        # Go through each trial and grab the spikes for that trial
-        for ii in sync - 1:
-            
-            # Find the spikes between the PG and RS (plus 30 sec on both sides)
-            ind = (p_times > n_onsets[ii] + trials['PG time'][ii+n_shift] - 30.) & \
-                (p_times < n_onsets[ii] - trials['RS time'][ii+n_shift] + 30);
-            
-            spikes[ii+n_shift] = p_times[ind] - n_onsets[ii] + trials['RS time'][ii+n_shift];
-            spikes[ii+n_shift].sort();
-        
-        # This part scales the spike times
-        if norm == 'PG':
-            for jj in np.arange(len(trials)):
-                spikes[jj] = trials['Scale'][jj][0] * spikes[jj];
-        elif norm == 'RS':
-            for jj in np.arange(len(trials)):
-                spikes[jj] = trials['Scale'][jj][1] * spikes[jj];
-        elif norm == 'PG + RS':
-            for jj in np.arange(len(trials)):
-                try: 
-                    spikes[jj][spikes[jj]<-1] = trials['Scale'][jj][0] * spikes[jj][spikes[jj]<-1];
-                except:
-                    spikes[jj] = spikes[jj];
-                try:
-                    spikes[jj][spikes[jj]>-1] = trials['Scale'][jj][1] * spikes[jj][spikes[jj]>-1];
-                except:
-                    spikes[jj] = spikes[jj];
-        
-        trials_spikes.append(spikes[n_shift:])
-       
-    # This part scales all the PG and FG times    
-    if norm == 'PG':
-        for jj in np.arange(len(trials)):
-            if jj == 0:
-                trials['PG time'][jj] = -8;
-            else:
-                trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
-    elif norm == 'RS':
-        for jj in np.arange(len(trials)):
-            trials['RS time'][jj] = trials['Scale'][jj][1] * trials['RS time'][jj];
-    elif norm == 'PG + RS':
-        for jj in np.arange(len(trials)):
-            if jj == 0:
-                trials['PG time'][jj] = 0;
-            else:
-                trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
-            trials['RS time'][jj] = trials['Scale'][jj][1] * trials['RS time'][jj];
-       
-    # Exclude trials longer than 30 seconds
-    th = trials['Trial length'] < 30.
-    trials = trials[th]
-    
-    for x,spikes in enumerate(trials_spikes):
-        trials_spikes[x] = [ spikes[ii] for ii in np.nonzero(th)[0] ]
-    
-    return trials[n_shift:], trials_spikes
-
 def raster(trials, trial_spikes):
-
-    # okay, each row is a different trial, each spikes should be marked 
+    ''' This function creates a raster plot.  Each row is a trial, each spike
+    is shown as a vertical dash.  
+   
+    Arguments :
+    
+    trials : trial information, returned from the timelock function
+    trial_spikes : spike time information, returned from the timelock function
+    '''
+    
+    # Each row is a different trial, each spikes should be marked 
     # as a vertical dash.
     ind = 1
     for ii in np.arange(len(trial_spikes)):
         
         spikes = trial_spikes[ii]
         
+        # Checking if that trial has spikes
         try:
             spike_test = spikes.any()
         except:
             spike_test = False
         
+        # If it doesn't, just plot a red dash at t = 0
         if spike_test:
             plt.plot(spikes, ind*np.ones((len(spikes),)),'|',color='k');
         else:
-            #1/0
-            plt.plot(0, ind,'|',color='k');
+            plt.plot(0, ind,'|',color='r');
             
-        
-        if 'PG time' in trials.dtype.names:
+        # Plot markers to denote the PG or RS time
+        if trials['PG time'][-1] != 0:
             plt.plot(trials['PG time'][ii],ind,'.r');
-        elif 'RS time' in trials.dtype.names:
+        elif trials['PG time'][-1] == 0:
             plt.plot(trials['RS time'][ii],ind,'.r');
-        if 'FG time' in trials.dtype.names:
+            
+       
+       # Plot markers to denote the RS or FG time
+        if trials['FG time'][-1] != 0:
             plt.plot(trials['FG time'][ii],ind,'.b');
-        elif 'RS time' in trials.dtype.names:
+        elif trials['FG time'][-1] == 0:
             plt.plot(trials['RS time'][ii],ind,'.b');
         ind = ind + 1;
-        
-            
-        
+     
+    # Plot a gray line at t = 0 for reference
     plt.plot([0,0],[0,ind],'grey')
     
     plt.show()
@@ -810,7 +402,8 @@ def raster(trials, trial_spikes):
     return None
     
 def zscores(trials, data, bin_width = .2,range = (-10,3), label = None):
-
+    ''' Returns a plot showing the calcuated zscores over multiple trials'''
+    
     x, avg_peth, peths = peth(trials, data, bin_width, range, label, to_plot = 0)
     
     zsc = zscore(peths)
@@ -820,7 +413,7 @@ def zscores(trials, data, bin_width = .2,range = (-10,3), label = None):
     plt.imshow(zsc, interpolation = 'nearest', origin = 'lower', 
         aspect = 'auto', extent = extent)
 
-def peth(trials, data, bin_width = .2,range = (-10,3), label = None, to_plot = 1):
+def peth(trials, data, bin_width = 0.2,range = (-10,3), label = None, to_plot = 1):
     ''' Returns a Peri-Event Time Histogram.  Basically, it gives you a rate
     histogram over time.
     '''
@@ -892,7 +485,7 @@ def constants():
     
     return consts
 
-def get_figs(trials, trial_spikes, bin_width = 0.2, range = (-7,1), ymax = 4):
+def get_figs(trials, trial_spikes, bin_width = 0.2, range = (-7,1)):
     
     consts = constants();
 
@@ -925,50 +518,54 @@ def get_figs(trials, trial_spikes, bin_width = 0.2, range = (-7,1), ymax = 4):
     spk_pg_right_errs = [trial_spikes[ii] for ii in pg_right_errs.nonzero()[0]];
         
     fig1 = plt.figure()
-    peth(trials,spk_lefts, bin_width, range, label = 'left' + " n = " + str(len(spk_lefts)));
-    peth(trials,spk_rights, bin_width, range, label = 'right'+ " n = " + str(len(spk_rights)));
+    peth(trials[lefts],spk_lefts, bin_width, range, label = 'left' + " n = " + str(len(spk_lefts)));
+    peth(trials[rights],spk_rights, bin_width, range, label = 'right'+ " n = " + str(len(spk_rights)));
     ax = fig1.gca();
     ax.legend(loc = 'upper left');
-    plt.plot([0,0],[0,ymax + 1],'-',color = 'grey', lw=2)
-    plt.ylim((0,ymax));
+    plt.plot([0,0],[0,plt.ylim()[1] + 1],'-',color = 'grey', lw=2)
+    #plt.ylim((0,ymax));
     plt.xlabel('Time (s)', size = 'x-large')
     plt.ylabel('Activity (spikes/s)', size = 'x-large')
     plt.xticks(size = 'large')
     plt.yticks(size = 'large')
     
     fig2 = plt.figure()
-    peth(trials,spk_hits, bin_width, range, label = 'hits' + ' n = ' + str(len(spk_hits)));
-    peth(trials,spk_errs, bin_width, range, label = 'errors' + ' n = ' + str(len(spk_errs)));
+    peth(trials[hits],spk_hits, bin_width, range, label = 'hits' + ' n = ' + str(len(spk_hits)));
+    peth(trials[errs],spk_errs, bin_width, range, label = 'errors' + ' n = ' + str(len(spk_errs)));
     ax = fig2.gca();
     ax.legend(loc = 'upper left');
-    plt.plot([0,0],[0,ymax + 1],'-',color = 'grey', lw=2)
-    plt.ylim((0,ymax));
+    plt.plot([0,0],[0,plt.ylim()[1] + 1],'-',color = 'grey', lw=2)
+    #plt.ylim((0,ymax));
     plt.xlabel('Time (s)', size = 'x-large')
     plt.ylabel('Activity (spikes/s)', size = 'x-large')
     plt.xticks(size = 'large')
     plt.yticks(size = 'large')
     
     fig3 = plt.figure()
-    peth(trials,spk_pg_hits, bin_width, range, label = 'PG hits' + " n = " + str(len(spk_pg_hits)));
-    peth(trials,spk_pg_errs, bin_width, range, label = 'PG errors' + " n = " + str(len(spk_pg_errs)));
+    peth(trials[pg_hits],spk_pg_hits, bin_width, range, label = 'PG hits' + " n = " + str(len(spk_pg_hits)));
+    peth(trials[pg_errs],spk_pg_errs, bin_width, range, label = 'PG errors' + " n = " + str(len(spk_pg_errs)));
     ax = fig3.gca();
     ax.legend(loc = 'upper left');
-    plt.plot([0,0],[0,ymax + 1],'-',color = 'grey', lw=2)
-    plt.ylim((0,ymax));
+    plt.plot([0,0],[0,plt.ylim()[1] + 1],'-',color = 'grey', lw=2)
+   # plt.ylim((0,ymax));
     plt.xlabel('Time (s)', size = 'x-large')
     plt.ylabel('Activity (spikes/s)', size = 'x-large')
     plt.xticks(size = 'large')
     plt.yticks(size = 'large')
     
     fig4 = plt.figure()
-    peth(trials,spk_pg_left_hits, bin_width, range, label = 'PG left-hit' + " n = " + str(len(spk_pg_left_hits)));
-    peth(trials,spk_pg_left_errs, bin_width, range, label = 'PG left-error' + " n = " + str(len(spk_pg_left_errs)));
-    peth(trials,spk_pg_right_hits, bin_width, range, label = 'PG right-hit' + " n = " + str(len(spk_pg_right_hits)));
-    peth(trials,spk_pg_right_errs, bin_width, range, label = 'PG right-error' + " n = " + str(len(spk_pg_right_errs)));
+    peth(trials[pg_left_hits],spk_pg_left_hits, bin_width, range, 
+        label = 'PG left-hit' + " n = " + str(len(spk_pg_left_hits)));
+    peth(trials[pg_left_errs],spk_pg_left_errs, bin_width, range, 
+        label = 'PG left-error' + " n = " + str(len(spk_pg_left_errs)));
+    peth(trials[pg_right_hits],spk_pg_right_hits, bin_width, range, 
+        label = 'PG right-hit' + " n = " + str(len(spk_pg_right_hits)));
+    peth(trials[pg_right_errs],spk_pg_right_errs, bin_width, range, 
+        label = 'PG right-error' + " n = " + str(len(spk_pg_right_errs)));
     ax = fig4.gca();
     ax.legend(loc = 'upper left');
-    plt.plot([0,0],[0,ymax + 1],'-',color = 'grey', lw=2)
-    plt.ylim((0,ymax));
+    plt.plot([0,0],[0,plt.ylim()[1] + 1],'-',color = 'grey', lw=2)
+    #plt.ylim((0,ymax));
     plt.xlabel('Time (s)', size = 'x-large')
     plt.ylabel('Activity (spikes/s)', size = 'x-large')
     plt.xticks(size = 'large')
@@ -978,20 +575,20 @@ def get_figs(trials, trial_spikes, bin_width = 0.2, range = (-7,1), ymax = 4):
     peth(trials,trial_spikes, bin_width, range, label = 'All trials' + " n = " + str(len(trial_spikes)));
     ax = fig5.gca();
     ax.legend(loc = 'upper left');
-    plt.plot([0,0],[0,ymax + 1],'-',color = 'grey', lw=2)
-    plt.ylim((0,ymax));
+    plt.plot([0,0],[0,plt.ylim()[1] + 1],'-',color = 'grey', lw=2)
+    #plt.ylim((0,ymax));
     plt.xlabel('Time (s)', size = 'x-large')
     plt.ylabel('Activity (spikes/s)', size = 'x-large')
     plt.xticks(size = 'large')
     plt.yticks(size = 'large')
     
     fig6 = plt.figure()
-    peth(trials,spk_pg_lefts, bin_width, range, label = 'PG left' + " n = " + str(len(spk_pg_lefts)));
-    peth(trials,spk_pg_rights, bin_width, range, label = 'PG right'+ " n = " + str(len(spk_pg_rights)));
+    peth(trials[pg_lefts],spk_pg_lefts, bin_width, range, label = 'PG left' + " n = " + str(len(spk_pg_lefts)));
+    peth(trials[pg_rights],spk_pg_rights, bin_width, range, label = 'PG right'+ " n = " + str(len(spk_pg_rights)));
     ax = fig6.gca();
     ax.legend(loc = 'upper left');
-    plt.plot([0,0],[0,ymax + 1],'-',color = 'grey', lw=2)
-    plt.ylim((0,ymax));
+    plt.plot([0,0],[0,plt.ylim()[1] + 1],'-',color = 'grey', lw=2)
+    #plt.ylim((0,ymax));
     plt.xlabel('Time (s)', size = 'x-large')
     plt.ylabel('Activity (spikes/s)', size = 'x-large')
     plt.xticks(size = 'large')
