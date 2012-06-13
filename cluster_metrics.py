@@ -2,7 +2,7 @@
 quality of clustered data.
 
 Author:  Mat Leonard
-Last modified: 6/6/2012
+Last modified: 6/8/2012
 """
 
 import numpy as np
@@ -97,11 +97,38 @@ def false_pos(clustered_times, t_ref, t_cen, t_exp):
     
     return f_p_1
 
-def false_neg(waveforms):
+def false_neg(clustered_waveforms):
     ''' Returns the rate of false negatives caused by spikes below threshold
     '''
     
     # We need to get a histogram of the spike heights
+    
+    cl_spikes = clustered_waveforms
+    
+    for clst, spikes in spikes.iteritems():
+        # Get the peak heights for each spike
+        peaks = [np.min(spk) for spk in spikes]
+        
+        hist = 
+        
+        if to_plot == True:
+                
+            plt.figure();
+            
+            n_rows = np.ceil(len(cl_spikes)/3.0);
+        
+            for k in clusters:
+                
+                waveforms = self.clusters[k]['raw'];
+                
+               
+                
+                plt.subplot(n_rows, 3, cl_spikes.keys().index(k) + 1);
+                
+            
+            plt.show()
+    
+    
     
 def overlap(clustered_features, ignore = [0]):
     ''' Okay, so we are going to calculate the false positives and negatives
@@ -132,6 +159,7 @@ def overlap(clustered_features, ignore = [0]):
     # Make a dictionary to store the false negatives
     f_n = dict.fromkeys(c_feat.keys())
     
+    # This part is going to take out clusters we want to ignore
     keys = c_feat.keys()
     [ keys.pop(keys.index(ig)) for ig in ignore ]
     
