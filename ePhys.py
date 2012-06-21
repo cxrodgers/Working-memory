@@ -13,9 +13,10 @@ import pickle as pkl
 
 # A class used for spike sorting.
 class Spikesort(object):
-    ''' A class used for spike sorting.  In general, you will load the data file
-    with load_chans('path/to/data/file'), then just run sort().  From there you
-    can cluster with different parameters and check ISIs and cross-correlations.
+    ''' A class used for spike sorting.  In general, you will create the spike
+    sorter like so:  sorter = ePhys.Spikesort('path/to/data/file').  Then load 
+    the data file with sorter.load_chans([channels]), then just run 
+    sorter.sort().  Then, check mean waveforms, autocorrelations, and such.
     
     sort() runs a few methods:
     get_spikes() : captures voltage spikes that cross a threshold
