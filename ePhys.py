@@ -1,7 +1,8 @@
-# This is a module for analyzing eletrophysiology recordings.
+# This module provides a spike sorter object and various helper functions
+# Author: Mat Leonard
+# Last modified: 06-21-2012
 
 import scipy.special as spec
-import scipy.optimize as opt
 import numpy as np
 import ns5
 import scipy.signal as sig
@@ -30,11 +31,6 @@ class Spikesort(object):
             filename : path to the recording data file """
     
         self.filename = filename;
-        
-        # Create a dictionary for storing tetrode information
-        self.tetrodes = { 'waveforms' : [] , 'peaks' : [], \
-            'raw': [] }
-            
         
     def load_chans(self, channels):
         """ This method loads and filters the specified channels from the 
@@ -86,27 +82,27 @@ class Spikesort(object):
         if hasattr(self, 'clusters'):
             del self.clusters
         
-    def sort(self,threshold = 5,K = 8, dims = 5, to_plot = True, auto_K = True):
+    def sort(self,threshold = 4,K = 8, dims = 5, to_plot = True, auto_K = True):
         ''' This method combines everything up to clustering. '''
         self.get_spikes(threshold);
         self.get_tetrodes();
         
         try:
-            self.get_pca(to_plot = False);
+            self.get_pca(dims, to_plot = False);
         except:
-            print 'PCA broke!  Ruh roh!'
+            print 'PCA broke!!'
             print 'Number of spikes = ' + str(len(self.tetrodes['waveforms']))
             
         self.get_clusters(K, dims, 'full', to_plot, auto_K);
         
     def get_spikes(self,threshold):
-        """ This function returns 40 sample sections of the data that cross 
+        """ This function returns 30 sample sections of the data that cross 
         the threshold
 
         Arguments:
         
         threshold : this method catches pieces of the waveform that pass
-            threshold*np.median(np.abs(data)/0.6745)
+            -threshold*np.median(np.abs(data)/0.6745)
         """
         
         # Initialize these first
@@ -132,7 +128,8 @@ class Spikesort(object):
             # Loop through each sample that crossed threshold
             for x in caught[ii]: 
                 
-                # Put a 15 sample buffer at the beginning and between peaks
+                # Put a 15 sample buffer at the beginning and 
+                # 20 samples between peaks
                 if x<15 or x<(peak+20):
                     pass 
                 
@@ -153,15 +150,16 @@ class Spikesort(object):
             # Store the spikes and peaks for one channel.
             self.spikes[ii] = np.array(spikes);
             self.peaks[ii] = np.array(peaks);
-            
-        #self.data = [ {'waveform':self.chans[jj], 'channel':channels[ii]} \
-        #    for ii in np.arange(len(channels))];
         
     def get_tetrodes(self):
         """ This function takes the spike peak times found after thresholding and
         returns waveforms which are a concatenation of the spikes from each
         individual channel waveform.
         """
+        
+        # Create a dictionary for storing tetrode information
+        self.tetrodes = { 'waveforms' : [] , 'peaks' : [], \
+            'raw': [] }
         
         # Concatenate all the peak times from each channel
         cat_peaks = np.concatenate(self.peaks,axis=1);
@@ -186,7 +184,7 @@ class Spikesort(object):
                 # Find the channel with the peak
                 ch = np.argmin(np.min(samps, axis=1));
                 
-                # Find the peak sample in that channel
+                # Find the peak in that channel
                 peak = (p - 15) + np.argmin(samps[ch]);
                 
                 # Look at the the only filtered data
@@ -194,7 +192,7 @@ class Spikesort(object):
                 samps = np.array(samps)
                 
                 # If the waveform is pathological, don't store it
-                if (samps > 200).any() or (samps < -500).any():
+                if (samps > 300).any() or (samps < -500).any():
                     pass
                 
                 else:
@@ -282,9 +280,16 @@ class Spikesort(object):
         dims:  This number of dimensions in which you want to fit the
             Gaussians.  Can't be more than the number of PCA components in 
             the PCA array.
-                
+        
+        covariance:  The type of covariance matrix to use.  Using 'diag' is
+            a bti faster, but has lower quality.
+        
         to_plot:  Plots the clusters in 2-dimensions, for the first three 
             PCA components.
+            
+        auto_K:  Set to True to find the best model by minimizing the 
+            Bayesian Information Criterion (BIC).  Right now it is set
+            to test models with 4 to 14 clusters.
                 
         """
         
@@ -440,7 +445,7 @@ class Spikesort(object):
         #self.isi(klusters)
         
         # Adjust the figure margins and plot spacing
-        plt.subplots_adjust(left=0.1, right=0.97, top=0.94, bottom=0.1);
+        #~ plt.subplots_adjust(left=0.1, right=0.97, top=0.94, bottom=0.1);
         
         plt.show();
         
@@ -505,8 +510,8 @@ class Spikesort(object):
                 plt.title('cluster ' + str(k) + ', n = ' + str(len(waveforms)));
                             
             # Adjust the figure margins and plot spacing
-            plt.subplots_adjust(left=0.07, right=0.97, top=0.94, bottom=0.06, \
-            hspace = 0.42);
+            #~ plt.subplots_adjust(left=0.07, right=0.97, top=0.94, bottom=0.06, \
+            #~ hspace = 0.42);
             
             plt.show()
     
@@ -547,8 +552,8 @@ class Spikesort(object):
             plt.title('cluster ' + str(k));
         
         # Adjust the figure margins and plot spacing
-        plt.subplots_adjust(left=0.03, right=0.97, top=0.94, bottom=0.06, \
-            hspace = 0.42);
+        #~ plt.subplots_adjust(left=0.03, right=0.97, top=0.94, bottom=0.06, \
+            #~ hspace = 0.42);
         
         plt.show();
         
@@ -640,8 +645,8 @@ class Spikesort(object):
             #plt.title('Cluster ' + str(k+1));
                 
         # Now actually draw the plot
-        plt.subplots_adjust(left=0.04, right=0.97, top=0.94, bottom=0.06, \
-            hspace = 0.42);
+        #~ plt.subplots_adjust(left=0.04, right=0.97, top=0.94, bottom=0.06, \
+            #~ hspace = 0.42);
         plt.show()
         
     def correls(self, klusters = None, doodads = None):
@@ -767,8 +772,8 @@ class Spikesort(object):
             #plt.title('Cluster ' + str(k+1));
                 
         # Adjust the figure margins and plot spacing
-        plt.subplots_adjust(left=0.03, right=0.97, top=0.94, bottom=0.06, \
-            hspace = 0.42);
+        #~ plt.subplots_adjust(left=0.03, right=0.97, top=0.94, bottom=0.06, \
+            #~ hspace = 0.42);
         # Now actually draw the plot
         plt.show()
         
