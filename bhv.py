@@ -11,6 +11,7 @@ import re
 import pickle as pkl
 from matplotlib.mlab import find
 from numpy import linalg
+import matplotlib.pyplot as plt
 
 class Rattatat:
     
@@ -49,8 +50,21 @@ class Rattatat:
         self.streaks = streaks
         
         return ratio
+    
+    def strategies(self):
         
-    def fit_strats(self,s_num):
+        streaks = self.hit_streaks()
+        
+        uncued = find([ len(s) > 1 for s in self.streaks ])
+        
+        sess_strats = [ self._fit_strats(ii) for ii in uncued ]
+        
+        block_match =  [ sess[1] for sess in sess_strats ]
+        
+        return block_match
+    
+    
+    def _fit_strats(self,s_num):
         
         # We're going to want to fit models to the data, for each block
         
@@ -83,7 +97,7 @@ class Rattatat:
             else:
                 patch_len = 4
             
-            for kk in np.arange(len(trial_data) - patch_len):
+            for kk in np.arange(len(trial_data) - patch_len + 1):
                 
                 data = trial_data[kk:kk+patch_len]
                 errs = trial_errs[kk:kk+patch_len]
@@ -113,21 +127,31 @@ class Rattatat:
                 ind_2 = np.sum(np.abs(x_2[1:]+data))/len(data)/2.0
                 
                 R = (ind_e, ind_1, ind_2)
-                
+ 
                 match.append(R)
-                
+
             blocks.append(len(match)-1)
         
         # Find where the blocks are
-        blocks = np.array(blocks)
-        iterblocks = zip(np.concatenate((np.zeros(1).astype(int),
-            blocks[:-1])),blocks)
+
+        blocks = np.array(blocks) + np.ones(len(blocks))
+        blocks = blocks.astype(int)
+        if blocks[0] == 0:
+            iterblocks = zip(np.concatenate((np.zeros(1).astype(int),
+                blocks[:-1])),blocks)
+        else:
+            iterblocks = zip(blocks[:-1],blocks[1:])
         
         # For each block, average the match index
         for x,y in iterblocks:
             
+            assert x != y, 'Got a problem here'
+            avg = np.sum(match[x:y], axis=0)/(y-x)
+            
+            #assert not isnan(avg)
+            
             match_sum.append(np.sum(match[x:y], axis=0)/(y-x))
-        
+  
         return match, match_sum, blocks 
 
 def gettimes(data):
@@ -194,7 +218,7 @@ def build_rats(datadir = None):
     #check for trialdata, if not already there, load data!
     if 'trialdata' in os.listdir(datadir):
         
-        x=file('trialdata');
+        x=file(datadir +'trialdata');
         saved_data = pkl.load(x);
         trialdata = saved_data[0]
         stims = saved_data[1]
@@ -323,17 +347,10 @@ def build_rats(datadir = None):
         
     return rats
 
-def LLRR_perf(rats):
+def strats_perf(rats):
+    plt.figure()
+    for rat in rats:
+        plt.plot([ np.mean(sess, axis=0)[2] 
+            for sess in rat.strategies() if len(sess) != 0], label = rat.name)
+    plt.legend()
     
-    rat_match = [0]*len(rats)
-    for ii, rat in enumerate(rats):
-        avg_match = [0]*len(rat.sess)
-        for sess in np.arange(len(rat.sess)):
-            avg_match[sess] = rat.fit_strats(sess)[1]
-    
-        rat_match[ii] = avg_match
-        
-    return rat_match
-    
-    
-
