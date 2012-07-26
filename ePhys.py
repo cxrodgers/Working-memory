@@ -10,6 +10,7 @@ from sklearn.decomposition import PCA
 import matplotlib.pylab as plt
 from sklearn import mixture
 import pickle as pkl
+from multiprocessing import Process
 
 # A class used for spike sorting.
 class Spikesort(object):
@@ -129,9 +130,8 @@ class Spikesort(object):
             # Loop through each sample that crossed threshold
             for x in caught[ii]: 
                 
-                # Put a 15 sample buffer at the beginning and 
-                # 20 samples between peaks
-                if x<15 or x<(peak+20):
+                # Put 20 samples between peaks
+                if x<(peak+20):
                     pass 
                 
                 else:
@@ -142,15 +142,15 @@ class Spikesort(object):
                     peak = x+np.argmin(spike);
                     
                     # Grab 30 samples around that peak
-                    spike = self.chans[ii][(peak-10):(peak+20)];
+                    #spike = self.chans[ii][(peak-10):(peak+20)];
                     
                     # Then, store the captured spike and peak (in samples)
-                    spikes.append(spike);
+                    #spikes.append(spike);
                     peaks.append(peak);
     
-            # Store the spikes and peaks for one channel.
+            # Store the peaks for one channel.
             self.spikes[ii] = np.array(spikes);
-            self.peaks[ii] = np.array(peaks);
+            self.peaks[ii] = np.array(peaks[1:]);
         
     def get_tetrodes(self):
         """ This function takes the spike peak times found after thresholding and
@@ -159,8 +159,7 @@ class Spikesort(object):
         """
         
         # Create a dictionary for storing tetrode information
-        self.tetrodes = { 'waveforms' : [] , 'peaks' : [], \
-            'raw': [] }
+        self.tetrodes = { 'waveforms' : [] , 'peaks' : [] } #, \'raw': [] }
         
         # Concatenate all the peak times from each channel
         cat_peaks = np.concatenate(self.peaks,axis=1);
@@ -180,7 +179,7 @@ class Spikesort(object):
                 pass
             else:
                 # Grab 30 samples from each channel around previously found peak
-                samps = [ self.chans[ii][(p-15):(p+15)] for ii in np.arange(4) ];
+                samps = [ self.filt_chans[ii][(p-10):(p+20)] for ii in np.arange(4) ];
                 
                 # Find the channel with the peak
                 ch = np.argmin(np.min(samps, axis=1));
@@ -189,7 +188,7 @@ class Spikesort(object):
                 peak = (p - 15) + np.argmin(samps[ch]);
                 
                 # Look at the the only filtered data
-                samps = [ self.filt_chans[ii][(peak-20):(peak+40)] for ii in np.arange(4) ];
+                #samps = [ self.filt_chans[ii][(peak-20):(peak+40)] for ii in np.arange(4) ];
                 samps = np.array(samps)
                 
                 # If the waveform is pathological, don't store it
@@ -199,27 +198,27 @@ class Spikesort(object):
                 else:
                     # Store the raw waveform
                     cat_spikes = np.concatenate(samps);
-                    raw_tetro_spikes.append(cat_spikes);
+                    #raw_tetro_spikes.append(cat_spikes);
                 
                     # Store the peak
                     tetro_peaks.append(peak);
                     
                     # Then grab 30 samples around that peak from each channel
-                    samps = [ self.chans[ii][(peak-10):(peak+20)] for ii in np.arange(4) ];
+                    #samps = [ self.filt_chans[ii][(peak-10):(peak+20)] for ii in np.arange(4) ];
                     
                     # Concatenate into one tetrode waveform
-                    cat_spikes = np.concatenate(samps);
+                    #cat_spikes = np.concatenate(samps);
                     
                     # Store that waveform
                     tetro_spikes.append(cat_spikes);
                     
         tetro_peaks = np.array(tetro_peaks);
         tetro_spikes = np.array(tetro_spikes);
-        raw_tetro_spikes = np.array(raw_tetro_spikes);
+        #raw_tetro_spikes = np.array(raw_tetro_spikes);
         
         # Create a dictionary storing the spike waveforms and the peak times
-        self.tetrodes = { 'waveforms' : tetro_spikes, 'peaks' : tetro_peaks/30000.0, \
-            'raw' : raw_tetro_spikes }
+        self.tetrodes = { 'waveforms' : tetro_spikes, 'peaks' : tetro_peaks/30000.0 } #, \
+            #'raw' : raw_tetro_spikes }
         
     def get_pca(self,dims=5, to_plot = True):
         """ This method performs PCA on the tetrode waveforms.  PCA can be
@@ -240,12 +239,12 @@ class Spikesort(object):
             peaks =  [ cluster['peaks'] for cluster in self.clusters ];
             peaks = np.concatenate(peaks);
             
-            raw = [ cluster['raw'] for cluster in self.clusters ];
-            raw = np.concatenate(raw);
+            #~ raw = [ cluster['raw'] for cluster in self.clusters ];
+            #~ raw = np.concatenate(raw);
             
             self.tetrodes['waveforms'] = spikes;
             self.tetrodes['peaks'] = peaks;
-            self.tetrodes['raw'] = raw;
+            #~ self.tetrodes['raw'] = raw;
             
             del self.clusters
             
@@ -301,8 +300,8 @@ class Spikesort(object):
             pca = np.concatenate(pca)
             waveforms = [ cluster['waveforms'] for cluster in self.clusters[1:] ]
             waveforms = np.concatenate(waveforms)
-            raw = [ cluster['raw'] for cluster in self.clusters[1:] ]
-            raw = np.concatenate(raw)
+            #~ raw = [ cluster['raw'] for cluster in self.clusters[1:] ]
+            #~ raw = np.concatenate(raw)
             peaks = [ cluster['peaks'] for cluster in self.clusters[1:] ]
             peaks = np.concatenate(peaks)
             noise = self.clusters[0]
@@ -311,7 +310,7 @@ class Spikesort(object):
             pca = self.pca[:,:dims]
             waveforms = self.tetrodes['waveforms']
             peaks = self.tetrodes['peaks']
-            raw = self.tetrodes['raw']
+            #~ raw = self.tetrodes['raw']
         
         
         # This part will automatically find the best number of classes to use
@@ -332,29 +331,16 @@ class Spikesort(object):
                 
                 # We need to save the bic value from the previous model so we
                 # can find the best model
-                if 'prev_bic' not in locals():
-                    prev_bic = gmm.bic(pca)
-                elif gmm.bic(pca) > prev_bic:
-                    # If the current number of classes (K) produces a worse model than
-                    # the previous model, cluster with K-1 classes and stop
-                    
+                if 'prev_model' not in locals():
+                    prev_model = gmm
+                elif gmm.bic(pca) > prev_model.bic(pca):
+                   
+                    gmm = prev_model
                     K = K - 1
-                    
-                    gmm = mixture.GMM(n_components = K, covariance_type = covariance, 
-                    init_params='')
-                
-                    # Fit the GMM to the data
-                    gmm.fit(pca)
-                    
-                    # If the model hasn't converged, keep training it
-                    while gmm.converged_ == False:
-                        gmm.fit(pca)
-                    
                     break
                 else:
-                    prev_bic = gmm.bic(pca)
+                    prev_model = gmm
                     
-                
         else:
             # Instantiate the GMM 
             gmm = mixture.GMM(n_components = K, covariance_type = covariance, 
@@ -381,11 +367,11 @@ class Spikesort(object):
         # into 'waveforms' and 'peaks', which are the tetrode  voltage waveforms
         # and peak times respectively.
         self.clusters = [ { 'waveforms' : waveforms[cl], 'peaks' : peaks[cl], \
-            'pca' : pca[cl], 'raw': raw[cl]} for cl in clusters ];
+            'pca' : pca[cl]} for cl in clusters] # 'raw': raw[cl]} for cl in clusters ];
         
         # Let's add in a cluster just for noise and artifacts 
         self.clusters.insert(0, { 'waveforms' : 0, 'peaks' : 0, \
-                'pca' : 0, 'raw': 0 })
+                'pca' : 0 }) #, 'raw': 0 })
         
         if 'noise' in locals():
             self.clusters[0] = noise
@@ -450,8 +436,19 @@ class Spikesort(object):
         
         plt.show();
         
+        
+        # Going to try to run these on two different processes to
+        # speed things up, hopefully.
+        #~ mean_process = Process(target = self.mean_spikes, args = (klusters,))
+        #~ mean_process.start()
         self.mean_spikes(klusters)
+        
+        #~ auto_process = Process(target = self.autocorr, args = (klusters,))
+        #~ auto_process.start()
         self.autocorr(klusters)
+        
+        #~ mean_process.join()
+        #~ auto_process.join()
         
         
     def mean_spikes(self, klusters = None, to_plot = True):
@@ -470,7 +467,8 @@ class Spikesort(object):
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist();
         
-        self.means = [ np.mean(clst['raw'],axis=0) for clst in self.clusters ]
+        #self.means = [ np.mean(clst['raw'],axis=0) for clst in self.clusters ]
+        self.means = [ np.mean(clst['waveforms'],axis=0) for clst in self.clusters ]
         
         # Check for nans and set them to 0
         nans = np.nonzero([ np.isnan(means).all() for means in self.means ])[0]
@@ -489,7 +487,7 @@ class Spikesort(object):
         
             for k in klusters:
                 
-                waveforms = self.clusters[k]['raw'];
+                waveforms = self.clusters[k]['waveforms'];
                 
                 # Draw 100 random waveforms from cluster
                 # Check to be sure that cluster has more than 100 waveforms
@@ -814,7 +812,7 @@ class Spikesort(object):
         self.clusters.append(comb);
             
         # And replot
-        self.plot_clust(np.arange(len(self.clusters)));
+        self.plot_clust(np.arange(len(self.clusters))[1:]);
         #self.autocorr(np.arange(len(self.cls)));
         #self.mean_spikes(np.arange(len(self.cls)));
         
@@ -851,8 +849,8 @@ class Spikesort(object):
         
         new_clusters = [ { 'waveforms' : cluster['waveforms'][cl], 
             'peaks' : cluster['peaks'][cl], 
-            'pca' : cluster['pca'][cl], 'raw': cluster['raw'][cl] } \
-            for cl in clusters ];
+            'pca' : cluster['pca'][cl] }  #, 'raw': cluster['raw'][cl] } \
+            for cl in clusters ]
         
         # Now remove the cluster we are splitting
         self.clusters.pop(kluster)
@@ -860,7 +858,7 @@ class Spikesort(object):
         # And add the two new clusters
         self.clusters.extend(new_clusters)
         
-        self.plot_clust()
+        self.plot_clust(np.arange(len(self.clusters))[1:])
         
     def remove(self, klusters):
         ''' Adds a cluster to the noise cluster.
@@ -942,9 +940,13 @@ class Spikesort(object):
         for ii, clst in enumerate(self.clusters[1:]):
             
             mean = self.means[ii]
-            cov = np.matrix(np.cov(clst['raw'].T))
+            #~ cov = np.matrix(np.cov(clst['raw'].T))
             
-            diff = np.matrix(clst['raw'] - mean)
+            #~ diff = np.matrix(clst['raw'] - mean)
+            
+            cov = np.matrix(np.cov(clst['waveforms'].T))
+            
+            diff = np.matrix(clst['waveforms'] - mean)
             invcov = np.matrix(np.linalg.inv(cov))
             
             # Calculate the chi^2 values for each data point
@@ -961,7 +963,7 @@ class Spikesort(object):
                 # Save only the inliers
                 clst[key] = values[inliers]
         
-        self.plot_clust(np.arange(1,len(self.clusters)))
+        self.plot_clust(np.arange(len(self.clusters))[1:])
 
 
 
