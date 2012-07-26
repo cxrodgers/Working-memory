@@ -149,10 +149,6 @@ def overlap(clustered_features, ignore = [0]):
     
     c_feat = clustered_features
     
-    # Make a dictionary to store our models
-    submodels = dict.fromkeys(c_feat.keys())
-    models = dict.fromkeys(c_feat.keys())
-    
     # Make a dictionary to store the false positives
     f_p = dict.fromkeys(c_feat.keys())
     
