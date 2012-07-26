@@ -27,7 +27,7 @@ class Rattatat:
         perfs = [np.sum(self.hits[ii] & block[ii])/np.float(np.sum(block[ii]))
             for ii in range(len(self.hits))]
                 
-        return perfs
+        return np.array(perfs)
 
     def hit_streaks(self):
         
@@ -91,44 +91,35 @@ class Rattatat:
             trial_errs = big_errs[firsts[jj]:(firsts[jj]
                 + self.uncued_lens[s_num][jj])]
             
-            # We want to move the models along the data and fit again
-            if len(trial_data) >= 6:
-                patch_len = 6
-            else:
-                patch_len = 4
+            #patch_len = len(trial_data)
+                
+            # Build the switch on errors model
+            x_e = np.array([0]*len(trial_data))
+            x_e[0] = trial_data[0]
+            for ii in np.arange(len(x_e)-1):
+                x_e[ii+1] = x_e[ii] * trial_errs[ii]
             
-            for kk in np.arange(len(trial_data) - patch_len + 1):
-                
-                data = trial_data[kk:kk+patch_len]
-                errs = trial_errs[kk:kk+patch_len]
-                
-                # Build the switch on errors model
-                x_e = np.array([0]*len(data))
-                x_e[0] = data[0]
-                for ii in np.arange(len(x_e)-1):
-                    x_e[ii+1] = x_e[ii] * errs[ii]
-                
-                # Build the LRLR model
-                x_1 = np.array([0]*len(data))
-                x_1[0] = data[0]
-                for ii in np.arange(len(x_1)-1):
-                    x_1[ii+1] = -x_1[ii]
-                
-                # Build the LLRR model
-                x_2 = np.array([0]*(len(data)+1))
-                x_2[1] = data[0]
-                x_2[0] = big_data[firsts[jj]+kk-1]
-                for ii in np.arange(1,len(x_2)-1):
-                    x_2[ii+1] = -x_2[ii-1]
+            # Build the LRLR model
+            x_1 = np.array([0]*len(trial_data))
+            x_1[0] = trial_data[0]
+            for ii in np.arange(len(x_1)-1):
+                x_1[ii+1] = -x_1[ii]
+            
+            # Build the LLRR model
+            x_2 = np.array([0]*(len(trial_data)+1))
+            x_2[1] = trial_data[0]
+            x_2[0] = big_data[firsts[jj]-1]
+            for ii in np.arange(1,len(x_2)-1):
+                x_2[ii+1] = -x_2[ii-1] * trial_errs[ii-1]
 
-                # This is an index of how well the models fit the data
-                ind_e = np.sum(np.abs(x_e+data))/len(data)/2.0
-                ind_1 = np.sum(np.abs(x_1+data))/len(data)/2.0
-                ind_2 = np.sum(np.abs(x_2[1:]+data))/len(data)/2.0
-                
-                R = (ind_e, ind_1, ind_2)
- 
-                match.append(R)
+            # This is an index of how well the models fit the data
+            ind_e = np.dot(x_e, trial_data)/len(trial_data)
+            ind_1 = np.dot(x_1, trial_data)/len(trial_data)
+            ind_2 = np.dot(x_2[1:], trial_data)/len(trial_data)
+            
+            R = (ind_e, ind_1, ind_2)
+
+            match.append(R)
 
             blocks.append(len(match)-1)
         
