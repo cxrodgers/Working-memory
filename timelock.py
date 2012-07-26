@@ -10,6 +10,9 @@ import pickle as pkl
 import matplotlib.pyplot as plt
 import scipy.io
 from scipy.stats.mstats import zscore
+from itertools import combinations
+from numpy.linalg import norm
+import myutils as ut
 
 def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     """ This function takes the behavior and spiking data, then returns
@@ -99,43 +102,46 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
         ('2PG outcome', 'i8'), ('PG outcome','i8'), ('FG outcome','i8'), \
         ('PG time','f8'), ('RS time', 'f8'), ('FG time', 'f8'), \
         ('PG response','i8'), ('Response','i8'), ('Trial length', 'f8'), \
-        ('Block', 'i8'), ('Scale', 'f8', 2)];
+        ('Block', 'i8'), ('Scale', 'f8', 2), ('Leave PG', 'f8'), \
+        ('C time', 'f8', 2)];
 
     trials = np.zeros((len(b_onsets),),dtype = records)
 
     # Populate the array
-
+    
+    bdata = data_dict['behave']['TRIALS_INFO']
+    
     # Correct port for the second previous goal
     trials['2PG port'] = np.concatenate((np.zeros(2), \
-        data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)-2]));
+        bdata['CORRECT_SIDE'][:len(b_onsets)-2]));
     
     # Correct port for the previous goal
     trials['PG port'] = np.concatenate((np.array((0,)), \
-        data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)-1]));
+        bdata['CORRECT_SIDE'][:len(b_onsets)-1]));
 
     # Correct port for the future goal
-    trials['FG port'] = data_dict['behave']['TRIALS_INFO']['CORRECT_SIDE'][:len(b_onsets)];
+    trials['FG port'] = bdata['CORRECT_SIDE'][:len(b_onsets)];
 
     # Was the previous response a hit or an error
     trials['2PG outcome'] = np.concatenate((np.zeros(2), \
-        data_dict['behave']['TRIALS_INFO']['OUTCOME'][:len(b_onsets)-2]))
+        bdata['OUTCOME'][:len(b_onsets)-2]))
     
     # Was the previous response a hit or an error
     trials['PG outcome'] = np.concatenate((np.array((0,)), \
-        data_dict['behave']['TRIALS_INFO']['OUTCOME'][:(len(b_onsets)-1)]))
+        bdata['OUTCOME'][:(len(b_onsets)-1)]))
 
     # Was the future response a hit or an error
-    trials['FG outcome'] = data_dict['behave']['TRIALS_INFO']['OUTCOME'][:len(b_onsets)]
+    trials['FG outcome'] = bdata['OUTCOME'][:len(b_onsets)]
     
     # Was the trial cued or uncued
-    trials['Block'] = data_dict['behave']['TRIALS_INFO']['BLOCK'][:len(b_onsets)]
+    trials['Block'] = bdata['BLOCK'][:len(b_onsets)]
     
     # What direction did the rat go (left = 1, right = 2)
     for ii in np.arange(len(b_onsets)):
         # If the trial was a hit, then the rat went to the correct port for that trial
         if trials['FG outcome'][ii] == consts['HIT']:
             trials['Response'][ii] = trials['FG port'][ii]
-        # If it was an error, the went to the other port
+        # If it was an error, then went to the other port
         elif trials['FG outcome'][ii] == consts['ERROR']:
             if trials['FG port'][ii] == consts['LEFT']:
                 trials['Response'][ii] = consts['RIGHT']
@@ -148,7 +154,7 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     # Initialize the scaling records, will be ones if not scaled at all
     trials['Scale'] = np.ones((len(trials),2));
     
-    # Now we'll get the event times relative to stimulus onset
+    # Now we'll get the event times
     for ii in np.arange(len(b_onsets)):
         
         times = data_dict['behave']['peh'][ii];
@@ -196,7 +202,32 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
             trials['FG time'][ii] = 0
         
         trials['Trial length'][ii] = fg_time - pg_time;
+        #1/0
+        # Get the time when the rat leaves the PG port
+        if (trials['PG response'][ii] == consts['RIGHT']) &(ii != 0):
+            
+            rpokes = prev_times['pokes']['R']
+            
+            pg_leave = np.nanmax( rpokes[rpokes < b_onsets[ii] ])
+        
+        elif (trials['PG response'] [ii]== consts['LEFT']) & (ii != 0):
+            
+            lpokes = prev_times['pokes']['L']
+            
+            pg_leave = np.nanmax( lpokes[ lpokes < b_onsets[ii] ])
+            
+        if ii == 0:
+            pg_leave = pg_time
+        
+        # Have to set the time based on the event I'm timelocking to
+        trials['Leave PG'][ii] = trials['PG time'][ii] + (pg_leave - pg_time)
     
+        # Now get the center port times
+        trials['C time'][ii][0] = trials['RS time'][ii] - (b_onsets[ii] - 
+            np.nanmin(times['states']['hold_center']))
+        trials['C time'][ii][1] = trials['RS time'][ii] + \
+            (np.nanmax(times['states']['hold_center2']) - b_onsets[ii])
+
     # Get the scaling factors
     if scaled:
         if time_zero == 'RS':
@@ -324,6 +355,8 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
                     trials['PG time'][jj] = trials['Scale'][jj][0] * trials['PG time'][jj];
                
                 trials['FG time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
+                
+                
             
             if time_zero == 'PG':
                 if jj == 0:
@@ -341,6 +374,9 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
                
                 trials['RS time'][jj] = trials['Scale'][jj][1] * trials['FG time'][jj];
      
+            trials['Leave PG'][jj] = trials['Scale'][jj][0] * trials['Leave PG'][jj]
+            trials['C time'][jj][0] = trials['Scale'][jj][0] * trials['C time'][jj][0]
+            trials['C time'][jj][1] = trials['Scale'][jj][1] * trials['C time'][jj][1]
     
     # Exclude trials longer than 20 seconds
     include = np.nonzero(trials['Trial length'] < 20.)[0]
@@ -445,7 +481,7 @@ def peth(trials, data, bin_width = 0.2,range = (-10,3), label = None, to_plot = 
     
     plt.show();
     
-    return x, peth, all_trials
+    return x, peth, np.array(all_trials)
 
 def avg_rate(data, to_plot = False):
     """ Calculates and returns the average spike rate for each trial."""
@@ -597,6 +633,8 @@ def get_figs(trials, trial_spikes, bin_width = 0.2, range = (-7,1)):
     plt.show()
     
 def LLRR_figs(trials, spikes, bin_width = 0.2, range = (-7,1)):
+    """ Makes raster and histogram plots for each trajectory, cued and 
+    uncued."""
     
     consts = constants()
     
@@ -662,8 +700,6 @@ def LLRR_figs(trials, spikes, bin_width = 0.2, range = (-7,1)):
     plt.subplot(224)
     plt.ylim(0,ymax)
     
-    
-    
     #plt.legend(loc='upper left')
     #plt.title('Uncued, FG hits')
     
@@ -697,7 +733,7 @@ def LLRR_figs(trials, spikes, bin_width = 0.2, range = (-7,1)):
     
     # Cued blocks this time.
     
-    # Find the trials for all four PG-FG combinations, in the cued blocks,
+    # Find the trials for all four PG-FG combinations, in the cued and uncued blocks,
     # and FG hits only.
     
     right_left = by_condition(trials, 'right', 'left', 'cued', 'hit')
@@ -789,6 +825,78 @@ def LLRR_figs(trials, spikes, bin_width = 0.2, range = (-7,1)):
     plt.title('Right->right')
     plt.xlim(range)
     
+def cue_uncue(trials, spikes, bin_width = 0.2, range = (-7,1)):
+    ''' This methods makes plots comparing cued and uncued PETHs '''
+    
+    conditions = [0]*8
+    conditions[0] = by_condition(trials, 'right', 'left', 'cued', 'hit')
+    conditions[1] = by_condition(trials, 'right', 'left', 'uncued', 'hit')
+    conditions[2] = by_condition(trials, 'left', 'left', 'cued', 'hit')
+    conditions[3] = by_condition(trials, 'left', 'left', 'uncued', 'hit')
+    conditions[4] = by_condition(trials, 'left', 'right', 'cued', 'hit')
+    conditions[5] = by_condition(trials, 'left', 'right', 'uncued', 'hit')
+    conditions[6] = by_condition(trials, 'right', 'right', 'cued', 'hit')
+    conditions[7] = by_condition(trials, 'right', 'right', 'uncued', 'hit')
+    
+    c_spikes = [0]*8
+    for ii, cond in enumerate(conditions):
+        c_spikes[ii] = [ spikes[ind] for ind in cond ]
+    
+    # Now plot all four on one figure
+    plt.figure()
+    
+    ylims = [0]*4
+    labels = ['Right->left', 'Left->left', 'Left->right', 'Right->right']
+
+    for ii in np.arange(4): 
+        plt.subplot(220 + ii + 1)
+        
+        # Plot averaged PETHs
+        x, unavg, uncued = peth(trials[conditions[2*ii+1]], c_spikes[2*ii+1],
+            bin_width, range, label = 'Uncued')
+        x, cuavg, cued = peth(trials[conditions[2*ii]], c_spikes[2*ii],
+            bin_width, range, label = 'Cued')
+        plt.title(labels[ii])
+        plt.xlim(range)
+        ylims[ii]=plt.ylim()[1]
+        
+        dx = np.diff(x)[0]
+        
+        # Now plot standard errors
+        stderr_un = np.std(uncued, axis = 0)/np.sqrt(len(uncued))
+        stderr_cu = np.std(cued, axis = 0)/np.sqrt(len(cued))
+        
+        y1 = unavg - stderr_un
+        y2 = unavg + stderr_un
+        plt.fill_between(x, y1 , y2, where=y2>=y1, facecolor='b', alpha=0.25)
+        y1 = cuavg - stderr_cu
+        y2 = cuavg + stderr_cu
+        plt.fill_between(x, y1, y2, where=y2>=y1, facecolor='g', alpha=0.25)
+        
+        # Now we need to check for significance
+        # Plot a light gray rectangle where signficant
+        sigs = np.zeros(uncued.shape[1], dtype = 'bool')
+        for ii in np.arange(uncued.shape[1]):
+            sig = ut.ranksum_small(uncued[:,ii], cued[:,ii])
+            sigs[ii] = sig[2] | sig[3]
+            if sig[2] | sig[3]:
+                plt.fill_between([x[ii] - dx/2, x[ii]+dx/2], 0, 20, where = [True, True], 
+                    facecolor = 'k', edgecolor = 'none', alpha = 0.2, dashes = 'dashdot')
+    
+    plt.legend()
+    ymax = np.max(ylims)
+    
+    plt.subplot(221)
+    plt.ylim(0,ymax)
+    
+    plt.subplot(222)
+    plt.ylim(0,ymax)
+    
+    plt.subplot(223)
+    plt.ylim(0,ymax)
+    
+    plt.subplot(224)
+    plt.ylim(0,ymax)
     
     
 def bar_figs(trials, spikes):
@@ -800,7 +908,7 @@ def bar_figs(trials, spikes):
     
     # Calculate average firing rates between previous goal and response
     
-    x, avg_peth, by_trial = peth(trials, spikes, range = (-20,10), to_plot=0)
+    #x, avg_peth, by_trial = peth(trials, spikes, range = (-20,10), to_plot=0)
     
     means = []
     
@@ -841,13 +949,24 @@ def bar_figs(trials, spikes):
     conditions[6] = by_condition(trials, 'left', 'right', 'cued', 'hit')
     conditions[7] = by_condition(trials, 'right', 'right', 'cued', 'hit')
     
-    # We'll get the means and standard deviations for each bar
+    # We'll get the means and standard errors for each bar
     
     heights, errs = np.zeros(len(conditions)), np.zeros(len(conditions))
     for ii, cond in enumerate(conditions):
         heights[ii] = np.mean(means[cond])
-        errs[ii] = np.std(means[cond])/len(means[cond])
-   
+        errs[ii] = np.std(means[cond])/np.sqrt(len(means[cond]))
+    
+    # Now let's check signifcance, using Mann-Whitney U
+    # We want to check each pair
+    sigs = dict()
+    itercomb = combinations(np.arange(1,9),2)
+    for ii, jj in itercomb:
+        samp1 = means[conditions[ii-1]]
+        samp2 = means[conditions[jj-1]]
+        sigtest = ut.ranksum_small(samp1, samp2)
+        sig = sigtest[2] | sigtest[3]
+        sigs.update({(ii,jj) : sig})
+
     # Now plot!  Bar plots!
     plt.figure()
     
@@ -859,18 +978,63 @@ def bar_figs(trials, spikes):
     plt.bar(left_c, heights[4:8], width= 1, yerr = errs[4:8], color = 'g',
         label = 'Cued')
     
+    # Now let's plot some significance information
+    itercomb = combinations(np.arange(1,9),2)
+    for ii, jj in itercomb:
+        # We only care about comparing uncued to cued for the same trajectory,
+        # and uncued between trajectories
+        
+        if (jj-ii == 4) or ((ii in np.arange(1,5)) & (jj in np.arange(1,5))):
+            pass
+        else:
+            continue
+        
+        signif = sigs[(ii,jj)]
+        if signif:
+            # If significant, plot an asterisk and some lines 
+            
+            # Set the left x location
+            if ii in np.arange(1,5):
+                lx = left_u[ii-1] + 0.5
+            else:
+                lx = left_c[ii-5] + 0.5
+            # Set the right x location
+            if jj in np.arange(1,5):
+                rx = left_u[jj-1] + 0.5
+            else:
+                rx = left_c[jj-5] + 0.5
+            
+            # Find how high the bars are
+            l_barh = heights[ii-1] + errs[ii-1]
+            r_barh = heights[jj-1] + errs[jj-1]
+            barh = max(heights) + max(errs)
+            
+            # Set the horizontal line height
+            if (ii in np.arange(1,5)) & (jj in np.arange(5,9)):
+                lineh = barh + 0.1*barh*(np.random.rand()+1)
+            else:
+                lineh = barh + 0.2*barh*(np.random.rand()+1)
+
+            # Plot the two vertical lines above the bars
+            plt.plot([lx, lx], [l_barh + l_barh*0.05, lineh], '-k')
+            plt.plot([rx, rx], [r_barh + r_barh*0.05, lineh], '-k')
+            
+            # Plot the horizontal line
+            plt.plot([lx, rx], [lineh, lineh], '-k')
+    
     plt.ylabel('Activity (Hz)')
     plt.xlabel('Condition')
     plt.xticks(range(2,12,3), 
         ('right->left', 'left->left', 'left->right', 'right->right'))
     plt.xlim(0,13)
+    plt.legend()
 
-    
     plt.show() 
     
+    #return sigs
     
 def by_condition(trials,  PG = 'all', FG = 'all', block = 'all',
-        outcome = 'all', PPG = 'all'):
+        outcome = 'all', pg_outcome = 'all', PPG = 'all'):
     '''  This method returns a list of the trial indices that fit the supplied conditions.
     
     Arguments:
@@ -900,6 +1064,9 @@ def by_condition(trials,  PG = 'all', FG = 'all', block = 'all',
     
     hits =  np.nonzero(trials['FG outcome'] == consts['HIT'])[0]
     errors = np.nonzero(trials['FG outcome'] == consts['ERROR'])[0]
+    
+    pg_hits =  np.nonzero(trials['PG outcome'] == consts['HIT'])[0]
+    pg_errors = np.nonzero(trials['PG outcome'] == consts['ERROR'])[0]
     
     if PG == 'left':
         pg_set = set(pg_lefts)
@@ -936,9 +1103,49 @@ def by_condition(trials,  PG = 'all', FG = 'all', block = 'all',
     elif outcome == 'all':
         outcome_set = set.union(set(hits), set(errors))
         
-    trial_set = set.intersection(pg_set, fg_set, ppg_set, block_set, outcome_set)
+    if pg_outcome == 'hit':
+        pg_outcome_set = set(pg_hits)
+    elif pg_outcome == 'error':
+        pg_outcome_set = set(pg_errors)
+    elif pg_outcome == 'all':
+        pg_outcome_set = set.union(set(pg_hits), set(pg_errors))
+        
+    trial_set = set.intersection(pg_set, fg_set, ppg_set, block_set,
+        outcome_set, pg_outcome_set)
     
     return np.sort(list(trial_set))
 
-
-
+def reliability(spikes, width):
+    ''' This function will measure the reliability of spikes for each
+    trajectory and compare between cued and uncued 
+    
+    Arguments:
+    spikes : a list of spike times for each trial that you want to find
+        the reliability across
+    width : width of the Gaussian used to convolve with the spike train,
+        enter in units of seconds    
+    '''
+    
+    # Convolve each spike train with a Gaussian.
+    # First step is to make each trial a spike train
+    trains = [ np.histogram(trial, bins = 8*1000, range = (-7,1))[0]
+        for trial in spikes ]
+   
+    # Make the Gaussian
+    x = np.arange(-1,1,0.001)
+    gaus = 1/(np.sqrt(2*np.pi)*(width))*np.exp(-x*x/2*width**2)
+    
+    # Now convolve each train
+    conv = [ np.convolve(train, gaus) for train in trains ]
+    
+    # Now find correlations for each pair
+    corrs = []
+    itercomb = combinations(np.arange(len(conv)),2)
+    for ii, jj in itercomb:
+        corrs.append(np.dot(conv[ii], conv[jj]) / 
+            (norm(conv[ii]) * norm(conv[jj])))
+    
+    # And sum over every thing to get the reliability measure
+    R_corr = 2./(len(conv))/(len(conv)-1)*sum(corrs)
+            
+    return R_corr
