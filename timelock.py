@@ -449,7 +449,8 @@ def zscores(trials, data, bin_width = .2,range = (-10,3), label = None):
     plt.imshow(zsc, interpolation = 'nearest', origin = 'lower', 
         aspect = 'auto', extent = extent)
 
-def peth(trials, data, bin_width = 0.2,range = (-10,3), label = None, to_plot = 1):
+def peth(trials, data, bin_width = 0.2,range = (-10,3), label = None,
+    to_plot = 1):
     ''' Returns a Peri-Event Time Histogram.  Basically, it gives you a rate
     histogram over time.
     '''
@@ -898,35 +899,78 @@ def cue_uncue(trials, spikes, bin_width = 0.2, range = (-7,1)):
     plt.subplot(224)
     plt.ylim(0,ymax)
     
+
     
+
+
 def bar_figs(trials, spikes):
+    # Make some bar plots here
+    _bar_fig(trials, spikes, 'PG in', 'PG out', title = 'In PG port')
+    _bar_fig(trials, spikes, 'PG out', 'Center in', title = 'PG out to center in')
+    _bar_fig(trials, spikes, 'Center in', 'Center out', title = 'In center port')
+    _bar_fig(trials, spikes, 'Center out', 'FG in', title = 'Center out to FG in')
+    _bar_fig(trials, spikes, 'PG in', 'Response', title = 'PG in to response')
+
+
+def _bar_fig(trials, spikes, low_event, high_event, title = None):
     ''' This method will make some figures, in particular, bar plots.  I want
     to compare firing rates during the delay period between all my conditions.
     So, the plots will compare average firing rate during the delay period, 
     that is between the previous goal and response.
+    
+    Arguments:
+    trials : structured array storing trials information, returned from 
+        timelock function
+    spikes : list of spike times for each trial
+    low_event : the event 
     '''
+    
+    if low_event in ['PG in', 'PG out', 'Center in', 'Center out', 'Response']:
+        pass
+    else:
+        raise ValueError, '%s not a valid option for low_event' % low_event
+        
+    if high_event in ['PG out', 'Center in', 'Center out', 'Response', 'FG in']:
+        pass
+    else:
+        raise ValueError, '%s not a valid option for high_event' % high_event
     
     # Calculate average firing rates between previous goal and response
     
-    #x, avg_peth, by_trial = peth(trials, spikes, range = (-20,10), to_plot=0)
-    
     means = []
     
-    #for ii, trial in enumerate(by_trial):
     for ii, spks in enumerate(spikes):
-        # Only want to find the average firing rate between previous goal
-        # and response
+        # Grabbing spikes between events in the trials
         
-        pg = trials['PG time'][ii]
-        rs = trials['RS time'][ii]
+        if low_event == 'PG in':
+            low = trials['PG time'][ii]
+        elif low_event == 'PG out':
+            low = trials['Leave PG'][ii]
+        elif low_event == 'Center in':
+            low = trials['C time'][ii][0]
+        elif low_event == 'Center out':
+            low = trials['C time'][ii][1]
+        elif low_event == 'Response':
+            low = trials['RS time'][ii]
+        
+        if high_event == 'PG out':
+            high = trials['Leave PG'][ii]
+        elif high_event == 'Center in':
+            high = trials['C time'][ii][0]
+        elif high_event == 'Center out':
+            high = trials['C time'][ii][1]
+        elif high_event == 'Response':
+            high = trials['RS time'][ii]
+        elif high_event == 'FG in':
+            high = trials['FG time'][ii]
         
         #means.append(np.mean(trial[(x > pg) & (x < rs)]))
         
         try:
-            num = len(spks[(spks > pg) & (spks < rs)])
+            num = len(spks[(spks > low) & (spks < high)])
         except:
             num = 0
-        means.append((num / np.abs(rs - pg))*trials['Scale'][ii][0])
+        means.append((num / np.abs(high - low))*trials['Scale'][ii][0])
         
         #means.append(len(spikes[( x>pg ) & (x < rs)])/np.abs((rs - pg)))
     
@@ -959,10 +1003,10 @@ def bar_figs(trials, spikes):
     # Now let's check signifcance, using Mann-Whitney U
     # We want to check each pair
     sigs = dict()
-    itercomb = combinations(np.arange(1,9),2)
+    itercomb = combinations(np.arange(0,8),2)
     for ii, jj in itercomb:
-        samp1 = means[conditions[ii-1]]
-        samp2 = means[conditions[jj-1]]
+        samp1 = means[conditions[ii]]
+        samp2 = means[conditions[jj]]
         sigtest = ut.ranksum_small(samp1, samp2)
         sig = sigtest[2] | sigtest[3]
         sigs.update({(ii,jj) : sig})
@@ -979,12 +1023,12 @@ def bar_figs(trials, spikes):
         label = 'Cued')
     
     # Now let's plot some significance information
-    itercomb = combinations(np.arange(1,9),2)
+    itercomb = combinations(np.arange(0,8),2)
     for ii, jj in itercomb:
         # We only care about comparing uncued to cued for the same trajectory,
         # and uncued between trajectories
         
-        if (jj-ii == 4) or ((ii in np.arange(1,5)) & (jj in np.arange(1,5))):
+        if (jj-ii == 4) or ((ii in np.arange(0,4)) & (jj in np.arange(0,4))):
             pass
         else:
             continue
@@ -994,26 +1038,26 @@ def bar_figs(trials, spikes):
             # If significant, plot an asterisk and some lines 
             
             # Set the left x location
-            if ii in np.arange(1,5):
-                lx = left_u[ii-1] + 0.5
+            if ii in np.arange(0,4):
+                lx = left_u[ii] + 0.5
             else:
-                lx = left_c[ii-5] + 0.5
+                lx = left_c[ii-4] + 0.5
             # Set the right x location
-            if jj in np.arange(1,5):
-                rx = left_u[jj-1] + 0.5
+            if jj in np.arange(0,4):
+                rx = left_u[jj] + 0.5
             else:
-                rx = left_c[jj-5] + 0.5
+                rx = left_c[jj-4] + 0.5
             
             # Find how high the bars are
-            l_barh = heights[ii-1] + errs[ii-1]
-            r_barh = heights[jj-1] + errs[jj-1]
+            l_barh = heights[ii] + errs[ii]
+            r_barh = heights[jj] + errs[jj]
             barh = max(heights) + max(errs)
             
             # Set the horizontal line height
             if (ii in np.arange(1,5)) & (jj in np.arange(5,9)):
-                lineh = barh + 0.1*barh*(np.random.rand()+1)
+                lineh = barh + 0.2*barh*(np.random.randn()+1)
             else:
-                lineh = barh + 0.2*barh*(np.random.rand()+1)
+                lineh = barh + 0.1*barh*(np.random.randn()+1)
 
             # Plot the two vertical lines above the bars
             plt.plot([lx, lx], [l_barh + l_barh*0.05, lineh], '-k')
@@ -1028,7 +1072,10 @@ def bar_figs(trials, spikes):
         ('right->left', 'left->left', 'left->right', 'right->right'))
     plt.xlim(0,13)
     plt.legend()
-
+    
+    if title != None:
+        plt.title(title)
+       
     plt.show() 
     
     #return sigs
