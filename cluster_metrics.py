@@ -6,30 +6,54 @@ Last modified: 6/8/2012
 """
 
 import numpy as np
-import kkpandas
+from KKFileSchema import KKFileSchema
+import os
+import kkio
 from scipy import optimize as opt
 from sklearn import mixture
 from itertools import combinations
 
-def load_spikes(features_file, clusters_file, samp_rate):
-    ''' This function takes the feature and cluster files in KlustaKwik format 
-    and pulls out the features and spike times for each cluster.
-    
-    Will extend this to load spike waveforms eventually.
-    
-    Arguments:
-    features_file : string path to the features file in KlustaKwik format
-    clusters_file : string path to the clusters file in KlustaKwik format
+def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
+    ''' This function takes the feature, cluster, and spike files in KlustaKwik format 
+    and pulls out the features, spike times, spike waveforms for each cluster.
+   
+    Parameters
+    -----------------------------------------
+    data_dir : path to the directory with the KlustaKwik files
+    group : the group number you want to load
     samp_rate : the sampling rate of the recording in samples per second
+    n_samp : number of samples for each stored spike in the spike file
+    n_chan : number of channels stored in the spike file
+    
+    Returns
+    ------------------------------------------
+    out : tuple
+        first element is a dictionary of clustered features
+        second element is a dictionary of clustered spike times
+        third element is a dictionary of clustered spike waveforms
     '''
-
-    # Get features and spike times
-    feat = kkpandas.read_fetfile(features_file)
+    
+    # Get the clustered data from Klustakwik files
+    kfs = KKFileSchema.coerce(data_dir)
+    
+    # Get the features and spike time stamps
+    feat = kkio.read_fetfile(kfs.fetfiles[group])
     features = feat.values[:,:-1]
-    time_stamps = feat.spike_time.values
-
+    time_stamps = feat.time.values
+    
     # Get spike cluster labels
-    clu = kkpandas.read_clufile(clusters_file)
+    clu = kkio.read_clufile(kfs.clufiles[group])
+    
+    # Get the spike waveforms
+    spikes = kkio.read_spkfile(kfs.spkfiles[group])
+    
+    # Reshape the spike waveforms into a useful form
+    spikes = spikes.reshape((len(spikes)/(n_chan*n_samp), (n_chan*n_samp)))
+    for ii, spike in enumerate(spikes):
+        spikes[ii] = spike.reshape((n_chan, n_samp), order = 'F').reshape(n_chan*n_samp)
+    
+    # Convert spike waveforms into voltage
+    spikes = spikes*(8192.0/2**16)
     
     # Cluster numbers
     cluster_nums = np.unique(clu.values)
@@ -43,6 +67,9 @@ def load_spikes(features_file, clusters_file, samp_rate):
     # Get the features for each cluster
     feats = [ features[ind] for ind in cluster_ind ]
     
+    # Get the spike waveforms for each cluster
+    spks = [ spikes[ind] for ind in cluster_ind ]
+    
     # Make a dictionary where each key is the cluster number and the value
     # is an array of the spike times in that cluster
     clustered_times = dict(zip(cluster_nums, times))
@@ -51,20 +78,24 @@ def load_spikes(features_file, clusters_file, samp_rate):
     # is an array of the features in that cluster
     clustered_features = dict(zip(cluster_nums, feats))
     
+    # Make a dictionary where each key is the cluster number and the value
+    # is an array of the features in that cluster
+    clustered_waveforms = dict(zip(cluster_nums, spks))
+    
     # Let's make sure the spike times for each cluster are sorted correctly
     for spikes in clustered_times.itervalues():
         spikes.sort()
     
-    return clustered_features, clustered_times
+    return clustered_features, clustered_times, clustered_waveforms
 
-def false_pos(clustered_times, t_ref, t_cen, t_exp):
+def refractory(clustered_times, t_ref, t_cen, t_exp):
     ''' Returns an estimation of false positives in a cluster based on the
     number of refractory period violations.  Returns NaN if an estimate can't
     be made, or if the false positive estimate is greater that 0.5.  This is 
     most likely because of too many spikes in the refractory period.
     
     Arguments:
-    clusters : dictionary of clusters from the load_spikes function
+    clustered_times : dictionary of clusters from the load_spikes function
     t_ref : the width of the refractory period, in seconds
     t_cen : the width of the censored period, in seconds
     t_exp : the total length of the experiment, in seconds
@@ -97,36 +128,36 @@ def false_pos(clustered_times, t_ref, t_cen, t_exp):
     
     return f_p_1
 
-def false_neg(clustered_waveforms):
-    ''' Returns the rate of false negatives caused by spikes below threshold
-    '''
+#~ def threshold(clustered_waveforms):
+    #~ ''' Returns the rate of false negatives caused by spikes below threshold
+    #~ '''
     
-    # We need to get a histogram of the spike heights
+    #~ # We need to get a histogram of the spike heights
     
-    cl_spikes = clustered_waveforms
+    #~ cl_spikes = clustered_waveforms
     
-    for clst, spikes in spikes.iteritems():
-        # Get the peak heights for each spike
-        peaks = [np.min(spk) for spk in spikes]
+    #~ for clst, spikes in spikes.iteritems():
+        #~ # Get the peak heights for each spike
+        #~ peaks = [np.min(spk) for spk in spikes]
         
-        hist = 
+        #~ hist = 
         
-        if to_plot == True:
+        #~ if to_plot == True:
                 
-            plt.figure();
+            #~ plt.figure();
             
-            n_rows = np.ceil(len(cl_spikes)/3.0);
+            #~ n_rows = np.ceil(len(cl_spikes)/3.0);
         
-            for k in clusters:
+            #~ for k in clusters:
                 
-                waveforms = self.clusters[k]['raw'];
+                #~ waveforms = self.clusters[k]['raw'];
                 
                
                 
-                plt.subplot(n_rows, 3, cl_spikes.keys().index(k) + 1);
+                #~ plt.subplot(n_rows, 3, cl_spikes.keys().index(k) + 1);
                 
             
-            plt.show()
+            #~ plt.show()
     
     
     
@@ -230,4 +261,28 @@ def overlap(clustered_features, ignore = [0]):
         f_n[clst] = np.sum(f_n[clst])
         
     return f_p, f_n
-        
+
+def censored(clustered_times, t_cen, t_exp):
+    ''' Returns the estimated false negative rate caused by spikes censored
+    after a detected spike
+    
+    Arguments:
+    clustered_times : dictionary of clusters from the load_spikes function
+    t_cen : the width of the censored period, in seconds
+    t_exp : the total length of the experiment, in seconds
+    '''
+    
+    # Get the total number of spikes first
+    N = np.sum([len(times) for times in clustered_times.itervalues()])
+    
+    # Create dictionary to store the false negative values
+    f_n = dict.fromkeys(clustered_times.keys())
+    
+    for clst, times in clustered_times.iteritems():
+        f_n[clst] = (N - len(times)) * t_cen / t_exp
+    
+    return f_n
+    
+    
+    
+    
