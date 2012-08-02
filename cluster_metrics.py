@@ -10,6 +10,7 @@ from KKFileSchema import KKFileSchema
 import os
 import kkio
 from scipy import optimize as opt
+from scipy.special import erf
 from sklearn import mixture
 from itertools import combinations
 
@@ -26,11 +27,11 @@ def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
     n_chan : number of channels stored in the spike file
     
     Returns
-    ------------------------------------------
-    out : tuple
-        first element is a dictionary of clustered features
-        second element is a dictionary of clustered spike times
-        third element is a dictionary of clustered spike waveforms
+    -----------------------------------------
+    out : dict
+        out['features'] : dictionary of clustered features
+        out['times'] :  dictionary of clustered spike times
+        out['waveforms'] : dictionary of clustered spike waveforms
     '''
     
     # Get the clustered data from Klustakwik files
@@ -53,7 +54,7 @@ def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
         spikes[ii] = spike.reshape((n_chan, n_samp), order = 'F').reshape(n_chan*n_samp)
     
     # Convert spike waveforms into voltage
-    spikes = spikes*(8192.0/2**16)
+    spikes = spikes*(8192.0/2.**16)
     
     # Cluster numbers
     cluster_nums = np.unique(clu.values)
@@ -86,7 +87,10 @@ def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
     for spikes in clustered_times.itervalues():
         spikes.sort()
     
-    return clustered_features, clustered_times, clustered_waveforms
+    out_dict = {'features' : clustered_features, 'times' : clustered_times,
+        'waveforms' : clustered_waveforms }
+    
+    return out_dict
 
 def refractory(clustered_times, t_ref, t_cen, t_exp):
     ''' Returns an estimation of false positives in a cluster based on the
@@ -94,7 +98,8 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
     be made, or if the false positive estimate is greater that 0.5.  This is 
     most likely because of too many spikes in the refractory period.
     
-    Arguments:
+    Parameters
+    -----------------------------------------
     clustered_times : dictionary of clusters from the load_spikes function
     t_ref : the width of the refractory period, in seconds
     t_cen : the width of the censored period, in seconds
@@ -125,41 +130,56 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
             f_p_1[clst] = opt.brentq(func, 0, 0.5)
         except:
             f_p_1[clst] = np.nan
-    
+        
+        # If there are no spikes in the refractory period, then set the
+        # false positive rate to 0
+        if ref == 0:
+            f_p_1[clst] = 0
+        
     return f_p_1
 
-#~ def threshold(clustered_waveforms):
-    #~ ''' Returns the rate of false negatives caused by spikes below threshold
-    #~ '''
+def threshold(clustered_waveforms, thresh):
+    ''' Returns the rate of false negatives caused by spikes below the 
+    detection threshold
     
-    #~ # We need to get a histogram of the spike heights
+    Parameters
+    -----------------------------------------
+    clustered_waveforms : dictionary of clustered waveforms, you get this 
+        from load_spikes function
+    thresh : detection threshold used for spike sorting
     
-    #~ cl_spikes = clustered_waveforms
+    Returns
+    -----------------------------------------
+    out : dictionary
+    f_n : false negative percentages for each cluster
+    '''
     
-    #~ for clst, spikes in spikes.iteritems():
-        #~ # Get the peak heights for each spike
-        #~ peaks = [np.min(spk) for spk in spikes]
+    # We need to get a histogram of the spike heights
+    
+    cl_spikes = clustered_waveforms
+    
+    # Create dictionary to store the false negative values
+    f_n = dict.fromkeys(cl_spikes.keys())
+    
+    for clst, spikes in cl_spikes.iteritems():
+        # Get the peak heights for each spike
+        peaks = [ np.min(spk) for spk in spikes ]
         
-        #~ hist = 
+        freq, x = np.histogram( peaks, 50 )
         
-        #~ if to_plot == True:
-                
-            #~ plt.figure();
+        X = x[:-1] + (x[1]-x[0])/2.
+        
+        # Find the moments of the data distribution
+        mu = np.sum(X*freq)/np.sum(freq)
+        sigma = np.sqrt(np.abs(np.sum((X-mu)**2*freq)/np.sum(freq)))
+        
+        # The false negative percentage is the cumulative Gaussian function
+        # up to the detection threshold
+        
+        cdf = 0.5*(1 + erf((thresh - mu)/np.sqrt(2*sigma**2)))
+        f_n[clst] = (1-cdf) 
             
-            #~ n_rows = np.ceil(len(cl_spikes)/3.0);
-        
-            #~ for k in clusters:
-                
-                #~ waveforms = self.clusters[k]['raw'];
-                
-               
-                
-                #~ plt.subplot(n_rows, 3, cl_spikes.keys().index(k) + 1);
-                
-            
-            #~ plt.show()
-    
-    
+    return f_n
     
 def overlap(clustered_features, ignore = [0]):
     ''' Okay, so we are going to calculate the false positives and negatives
@@ -173,7 +193,8 @@ def overlap(clustered_features, ignore = [0]):
     probably won't work very well.  The work around will be to ignore these
     bad clusters.
     
-    Arguments:
+    Parameters
+    -----------------------------------------
     ignore: a list of the clusters to ignore in the analysis.  Default is cluster
     zero since that is typically the noise cluster.
     '''
@@ -266,7 +287,8 @@ def censored(clustered_times, t_cen, t_exp):
     ''' Returns the estimated false negative rate caused by spikes censored
     after a detected spike
     
-    Arguments:
+    Parameters
+    -----------------------------------------
     clustered_times : dictionary of clusters from the load_spikes function
     t_cen : the width of the censored period, in seconds
     t_exp : the total length of the experiment, in seconds
@@ -282,7 +304,46 @@ def censored(clustered_times, t_cen, t_exp):
         f_n[clst] = (N - len(times)) * t_cen / t_exp
     
     return f_n
+
+def cluster_metrics(data, thresh, t_ref, t_cen, t_exp, ignore = [0]):
+    ''' This function runs all the metrics calculations and sums them
     
+    Parameters
+    -----------------------------------------
+    data : dictionary of clustered features, times, and waveforms, returned
+        from load_spikes function
+    thresh : detection threshold used for spike sorting
+    t_ref : the width of the refractory period, in seconds
+    t_cen : the width of the censored period, in seconds
+    t_exp : the total length of the experiment, in seconds
+    ignore : a list of the clusters to ignore in the analysis.  Default is cluster
+        zero since that is typically the noise cluster.
+    
+    '''
+    
+    f_p_r = refractory(data['times'], t_ref, t_cen, t_exp)
+    f_n_t = threshold(data['waveforms'], thresh)
+    f_p_o, f_n_o = overlap(data['features'], ignore)
+    f_n_c = censored(data['times'], t_cen, t_exp)
+    
+    # Make a dictionary to store the false positive rates
+    f_p = dict.fromkeys(f_p_r.keys())
+    
+    # Make a dictionary to store the false negative rates
+    f_n = dict.fromkeys(f_p_r.keys())
+    
+    for clst in f_p_r.iterkeys():
+        if np.isnan(f_p_r[clst]):
+            f_p[clst] = np.nan
+        else:
+            f_p[clst] = f_p_r[clst] + f_p_o[clst]
+        
+        if f_n_o[clst] == None:
+            f_n[clst] = np.nan
+        else:
+            f_n[clst] = f_n_t[clst] + f_n_o[clst] + f_n_c[clst]
+        
+    return f_p, f_n
     
     
     
