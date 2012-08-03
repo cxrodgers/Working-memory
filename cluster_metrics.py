@@ -1,6 +1,9 @@
 """  A module containing functions that calculate metrics for testing the 
 quality of clustered data.
 
+Load data from KlustaKwik files using the load_spikes() function.
+Get false positive and false negative estimates using metrics()
+
 Author:  Mat Leonard
 Last modified: 6/8/2012
 """
@@ -305,7 +308,7 @@ def censored(clustered_times, t_cen, t_exp):
     
     return f_n
 
-def cluster_metrics(data, thresh, t_ref, t_cen, t_exp, ignore = [0]):
+def metrics(data, thresh, t_ref, t_cen, t_exp, ignore = [0]):
     ''' This function runs all the metrics calculations and sums them
     
     Parameters
@@ -318,6 +321,13 @@ def cluster_metrics(data, thresh, t_ref, t_cen, t_exp, ignore = [0]):
     t_exp : the total length of the experiment, in seconds
     ignore : a list of the clusters to ignore in the analysis.  Default is cluster
         zero since that is typically the noise cluster.
+    
+    Returns
+    -----------------------------------------
+    f_p : dictionary of false positive estimates for each cluster
+        if an estimate can't be made, will be NaN.  This means that the 
+        estimate is >50%
+    f_n : dictionary of false negative estimates for each cluster
     
     '''
     
