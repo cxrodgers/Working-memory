@@ -7,10 +7,19 @@ from myutils import find
 import numpy as np
 
 class Bayesian(object):
-    
+    '''A Bayesian decoder for decoding goal choice from spike rates'''
     def __init__(self, goals, rates):
+        '''Parameters
+        -----------------------------------------
+        goals : an array of the experimental data for the goal chosen
+        rates : a list or array of the rates for each trial, for each unit.  
+            The format should have each item as a unit and each item in a unit 
+            is the spike rate for that trial.
+            So np.array([ Unit1[[trial1], [trial2], ..., [trialN]], 
+                Unit2[[trial1], [trial2], ..., [trialN], ..., UnitN[ ... ] ])
+            Trial rates can be a single number or a vector.
         
-        self._goals = goals
+        '''
         
         if len(np.shape(rates)) < 3:
             # This means we're working with a single unit
@@ -27,11 +36,18 @@ class Bayesian(object):
         self._Ntrain = self._Ntrials/2
         self._Ntest = self._Ntrials - self._Ntrain
         
-        self._Ngoals = len(np.unique(goals))
+        self._traingoals = goals[:self._Ntrain]
+        self._testgoals = goals[self._Ntrain:]
+        
+        self._trainrates = [ unit[:self._Ntrain] for unit in self._rates ]
+        self._testrates = [ unit[self._Ntrain:] for unit in self._rates ]
+        
+        # Get the different goal names, I set this up so the goals can be any
+        # data type, integers, strings, whatever.
         self._goalnames = np.unique(goals)
         
-        # Store the trial indices for each goal
-        self._gdict = dict.fromkeys(np.unique(goals))
+        # Make some dictionaries for storing data and information
+        self._gdict = dict.fromkeys(self._goalnames)
         self._means = self._gdict.copy()
         self._covs = self._gdict.copy()
         
@@ -39,57 +55,64 @@ class Bayesian(object):
         self.p_gr = [ self._gdict.copy() for ii in np.arange(self._Ntest) ]
         
         # Need to identify the trials for each goal choice, in the training data
-        for goal in self._gdict.iterkeys():
-            self._gdict[goal] = find(goals[:self._Ntrain] == goal)
+        for goal in self._goalnames:
+            self._gdict[goal] = find(self._traingoals == goal)
             
         # Calculate means and covariances for the prior from the training data
         for goal, ind in self._gdict.iteritems():
             self._means[goal] = np.array([ np.mean(unit[ind], axis = 0) 
-                for unit in self._rates])
+                for unit in self._trainrates])
             if self._dims < 2:
                 self._covs[goal] = np.array([ np.std(unit[ind]) 
-                for unit in self._rates])
+                for unit in self._trainrates])
             else:
                 self._covs[goal] = np.array([ np.cov(unit[ind], rowvar = 0) 
-                    for unit in self._rates])
-        
+                    for unit in self._trainrates])
         
     def decode(self):
-        
+        ''' Decodes the goal choices for the test data from the spike rates '''
         self.decoded = np.zeros(self._Ntest, dtype = self._goalnames.dtype)
         
         # Calculate the priors
         self._priors()
         
         self.p_g = dict.fromkeys(self._gdict.keys())
+        
+        # Calculate P(g)
         for goal in self._goalnames:
             self.p_g[goal] = len(self._gdict[goal])/np.float(self._Ntrain)
         
-        for tid, trial in enumerate(self.priors):
+        # Calculate P(g|r) = P(r|g) * P(g) (proportional)
+        for trial, prior in enumerate(self.priors):
             for goal in self._goalnames:
-                self.p_gr[tid][goal] = trial[goal]*self.p_g[goal]
+                self.p_gr[trial][goal] = prior[goal]*self.p_g[goal]
             
-            
-            self.decoded[tid] = sorted(self.p_gr[tid].items(), 
+            # Find the max posterior goal
+            self.decoded[trial] = sorted(self.p_gr[trial].items(), 
                 key = lambda tr: tr[1])[-1][0]
 
         return self.decoded
     
     def performance(self):
+        ''' Returns the performance of the decoder, the number of correctly
+        decoded trials from the test set divided by the number of trials in the
+        test set.'''
         
-        perf = np.sum(self._goals[-self._Ntest:] == self.decoded)/np.float(self._Ntest)
+        perf = np.sum(self._testgoals == self.decoded)/np.float(self._Ntest)
         return perf
         
     def _priors(self):
+        ''' This method calculates the prior distributions, P(r|g), for the test
+        data using parameters calculated from the training data set. '''
         
         p_rg_i = np.zeros(self._Nunits)
         
         # Calculate the prior for one trial at a time, in the test set
-        for trial in np.arange(self._Ntrain, self._Ntrials):
+        for trial in np.arange(self._Ntest):
             # Calculate the prior for each goal
             for goal in self._goalnames:
                 # Take the product over the units
-                for uid, urates in enumerate(self._rates):
+                for uid, urates in enumerate(self._testrates):
                     mean = self._means[goal][uid]
                     cov = self._covs[goal][uid]
                     if self._dims < 2:
@@ -97,7 +120,7 @@ class Bayesian(object):
                     else:
                         p_rg_i[uid] = multinormal(urates[trial], mean, cov)
                         
-                self.priors[trial-self._Ntrain][goal] = np.prod(p_rg_i)  
+                self.priors[trial][goal] = np.prod(p_rg_i)  
 
 def spike_rates(trials, spikes, dims):
     
