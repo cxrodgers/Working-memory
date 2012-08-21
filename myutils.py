@@ -1,12 +1,23 @@
 ''' A module with a bunch of different utility functions. '''
 
-from matplotlib.mlab import find as fd
+from matplotlib.mlab import find
 import numpy as np
 from scipy.stats import mannwhitneyu
 from numpy.random import permutation
 
 def ranksum(samp1, samp2):
-    if (len(samp1) <= 30) | (len(samp2) <= 30):
+    ''' Calculates the U statistic and probability that the samples are from
+    two different distributions.
+    
+    For small sample sizes (n, m <30), the U statistic is calculated directly.
+    The probability is found from a chart, at the p<0.05 level.
+    
+    For large sample sizes (n, m >30), the U statistic and probability are
+    calculated using scipy.stats.mannwhitneyu which uses a normal approximation.
+    
+    '''
+    
+    if (len(samp1) <= 30) & (len(samp2) <= 30):
         return ranksum_small(samp1, samp2)
     else:
         return mannwhitneyu(samp1, samp2)
@@ -70,21 +81,24 @@ def ranksum_small(samp1, samp2):
                 ranksums2.append(1)
     U2 = np.sum(ranksums2)
     
-    # Check significance 
+    # Check significance
+    
     if len(s1) <= len(s2):
         sig1 = U1 < _crit_u(len(s1),len(s2))
         sig2 = U2 < _crit_u(len(s1),len(s2))
     elif len(s1) > len(s2):
         sig1 = U1 < _crit_u(len(s2),len(s1))
-        sig2 = U2 < _crit_u(len(s2),len(s1))        
+        sig2 = U2 < _crit_u(len(s2),len(s1))
     
-    return U1, U2, sig1, sig2
+    if (sig1) | (sig2):
+        p = 0.05
+    else:
+        p = 1
+    
+    return np.min([U1, U2]), p
 
 def _crit_u(size1, size2):
     ''' This is basically just a table of critical U values for p < 0.05 '''
-    
-    if size1 > size2:
-        raise ValueError, 'size1 must be less than or equal to size 2'
     
     if (size1 < 3) | (size1 > 30):
         raise ValueError, 'size1 must be between 3 and 30, inclusive'
@@ -122,9 +136,6 @@ def _crit_u(size1, size2):
         [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,317]]).astype(int)
     
     return crits[size1-3,size2-5]
-
-def find(input):
-    return fd(input)
 
 def multinormal(x, mean, cov):
     
