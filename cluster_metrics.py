@@ -5,7 +5,7 @@ Load data from KlustaKwik files using the load_spikes() function.
 Get false positive and false negative estimates using metrics()
 
 Author:  Mat Leonard
-Last modified: 6/8/2012
+Last modified: 8/2/2012
 """
 
 import numpy as np
