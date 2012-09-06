@@ -202,7 +202,7 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
             trials['FG time'][ii] = 0
         
         trials['Trial length'][ii] = fg_time - pg_time;
-        #1/0
+        
         # Get the time when the rat leaves the PG port
         if (trials['PG response'][ii] == consts['RIGHT']) &(ii != 0):
             
@@ -225,8 +225,13 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
         # Now get the center port times
         trials['C time'][ii][0] = trials['RS time'][ii] - (b_onsets[ii] - 
             np.nanmin(times['states']['hold_center']))
-        trials['C time'][ii][1] = trials['RS time'][ii] + \
-            (np.nanmax(times['states']['hold_center2']) - b_onsets[ii])
+        try: 
+            trials['C time'][ii][1] = trials['RS time'][ii] + \
+                (np.nanmax(times['states']['hold_center2']) - b_onsets[ii])
+        except:
+            print times['states']['hold_center']
+            print times['states']['hold_center2']
+            trials['C time'][ii][1] = trials['C time'][ii][0]
 
     # Get the scaling factors
     if scaled:
@@ -383,7 +388,7 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     trials = trials[include]
     
     for x,spikes in enumerate(trials_spikes):
-        trials_spikes[x] = [ spikes[ii] for ii in include ]
+        trials_spikes[x] = tuple([ spikes[ii] for ii in include ])
        
     return trials[n_shift:], trials_spikes
     
@@ -1007,8 +1012,8 @@ def _bar_fig(trials, spikes, low_event, high_event, title = None):
     for ii, jj in itercomb:
         samp1 = means[conditions[ii]]
         samp2 = means[conditions[jj]]
-        sigtest = ut.ranksum_small(samp1, samp2)
-        sig = sigtest[2] | sigtest[3]
+        sigtest = ut.ranksum_small(samp1, samp2)[1]
+        sig = sigtest <= 0.05
         sigs.update({(ii,jj) : sig})
 
     # Now plot!  Bar plots!
