@@ -9,14 +9,14 @@ import ns5
 import numpy as np
 import pickle as pkl
      
-# Need to create this class to work with the syncing algorithm", 
+# Need to create this class to work with the syncing algorithm
 class Onsets(object):
     def __init__(self,onsets):
       self.audio_onsets = onsets
     
 behave_file = '/media/hippocampus/WM_data/CWM019/data_@TwoAltChoice_Memory_Mat_CWM019_120509a.mat' 
 neural_file = '/media/hippocampus/NDAQ/datafile_ML_CWM019_120509_001.ns5'
-save_as = 'CWM_120509_001.dat'
+save_as = 'CWM019_120509'
 
 loader = ns5.Loader(neural_file)
 loader.load_header()
@@ -38,15 +38,12 @@ b_onsets = Onsets(bcdata['onsets'])
 syncer = DataSession.BehavingSyncer()
 syncer.sync(b_onsets,n_onsets, force_run = 1)
    
-fil = open('behave_' + save_as,'w')
-bcontrol.process_for_saving(bcdata)
-pkl.dump(bcdata,fil)
-fil.close()
-    
-fil = open('onsets_' + save_as,'w')
-pkl.dump(n_onsets.audio_onsets,fil)
-fil.close()
+with open(save_as + '.bhv','w') as f:
+	bcontrol.process_for_saving(bcdata)
+	pkl.dump(bcdata,fil)
+
+with open(save_as + 'ons','w') as f:
+	pkl.dump(n_onsets.audio_onsets,f)
      
-fil = open('sync_' + save_as,'w')
-pkl.dump(syncer,fil)
-fil.close()
+with open(save_as+ '.syn','w') as f:
+	pkl.dump(syncer,f)
