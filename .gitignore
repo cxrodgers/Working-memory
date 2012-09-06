@@ -1,0 +1,8 @@
+*.pyc
+Behavior/*
+.DS_Store
+AudioTools.py
+CWM019/
+KKFileSchema.*
+schema.*
+*.ipynb
