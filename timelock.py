@@ -14,7 +14,7 @@ from itertools import combinations
 from numpy.linalg import norm
 import myutils as ut
 
-def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
+def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = False):
     """ This function takes the behavior and spiking data, then returns
     the spikes timelocked to the 'Response,' when the stimulus plays.
     
@@ -37,48 +37,77 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     A typical use would be "trials, spikes = timelock('/path/to/data')"
     """
     
-    # First we need to import the behavior and neural data, also the syncing
-    # information.
-
-    # Get list of files in datadir
-    filelist = os.listdir(datadir);
-    filelist.sort();
-
-    # We need to be able to handle data across multiple data files.
-    # So build a list of all the files and pull out relevant info.  
-    reg = [ re.search('(\w+)_(\w+)_(\w+)_(\w+).dat',fname) for fname in filelist];
-
-    # Okay, lets get all the different datafiles into a structure we can use.
-    # Initialize the data dictionary.
-    data_dict = dict((('clusters',None), ('onsets',None), ('sync',None), 
-        ('behave',None)));
-
-    # Populate the dictionary with our timing, behavior, and spiking information
-    for ii in np.arange(len(reg)):
-        if reg[ii] != None:
-            if reg[ii].group(1) == 'clusters':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['clusters'] = pkl.load(fin)
-                fin.close()
-            
-            elif reg[ii].group(1) == 'onsets':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['onsets'] = pkl.load(fin)
-                fin.close()
+   # First we need to import the behavior and neural data, also the syncing
+#     # information.
+# 
+#     # Get list of files in datadir
+#     filelist = os.listdir(datadir);
+#     filelist.sort();
+# 
+#     # We need to be able to handle data across multiple data files.
+#     # So build a list of all the files and pull out relevant info.  
+#     reg = [ re.search('(\w+)_(\w+)_(\w+)_(\w+).dat',fname) for fname in filelist];
+# 
+#     # Okay, lets get all the different datafiles into a structure we can use.
+#     # Initialize the data dictionary.
+#     data = dict((('clusters',None), ('onsets',None), ('sync',None), 
+#         ('bhv',None)));
+# 
+#     # Populate the dictionary with our timing, behavior, and spiking information
+#     for ii in np.arange(len(reg)):
+#         if reg[ii] != None:
+#             if reg[ii].group(1) == 'clusters':
+#                 fin = open(datadir + reg[ii].group(0),'r')
+#                 data['clusters'] = pkl.load(fin)
+#                 fin.close()
+#             
+#             elif reg[ii].group(1) == 'onsets':
+#                 fin = open(datadir + reg[ii].group(0),'r')
+#                 data['onsets'] = pkl.load(fin)
+#                 fin.close()
+#         
+#             elif reg[ii].group(1) == 'sync':
+#                 fin = open(datadir + reg[ii].group(0),'r')
+#                 data['sync'] = pkl.load(fin)
+#                 fin.close()
+#             
+#             elif reg[ii].group(1) == 'bhv':
+#                 fin = open(datadir + reg[ii].group(0),'r')
+#                 data['bhv'] = pkl.load(fin)
+#                 fin.close()
+#             
+#             rat = reg[ii].group(2);
+#             date = reg[ii].group(3);
         
-            elif reg[ii].group(1) == 'sync':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['sync'] = pkl.load(fin)
-                fin.close()
-            
-            elif reg[ii].group(1) == 'behave':
-                fin = open(datadir + reg[ii].group(0),'r')
-                data_dict['behave'] = pkl.load(fin)
-                fin.close()
-            
-            rat = reg[ii].group(2);
-            date = reg[ii].group(3);
+    tetrode = 2
 
+    filelist = os.listdir(datadir)
+    filelist.sort()
+    
+    reg = [ re.search('(\w+)_(\w+).(\w+)', filename) for filename in filelist ]
+    reg = [ r for r in reg if r != None ]
+    
+    ext = ['bhv', 'cls', 'syn', 'ons']
+    data = dict.fromkeys(ext)
+    
+    for r in reg:
+        if r.group(3) in ext:
+            if r.group(3) == 'cls':
+                file = '%s%s.%s' % (datadir, r.group(0), tetrode)
+                name = r.group(1)
+                date = r.group(2)
+            else:
+                file = '%s%s' % (datadir, r.group(0))
+            with open(file,'r') as f:
+                data[r.group(3)] = pkl.load(f)
+    
+    # Checking to make sure the data files were loaded
+    if None in data.viewvalues():
+        for key, value in data.iteritems():
+            if value == None:
+                raise Exception, '%s file wasn\'t loaded properly' % key
+                break
+    
     #~ Need to build a big list of each trial.  For each trial, here is what we need:
        
         #~ Previous goal (PG) port
@@ -94,8 +123,8 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
 
     
     # Get the stimulus onset for each trial
-    b_onsets = data_dict['behave']['onsets'];
-    consts = data_dict['behave']['CONSTS'];
+    b_onsets = data['bhv']['onsets'];
+    consts = data['bhv']['CONSTS'];
     
     # Create a structured array to keep all the relevant trial information
     records = [('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'), \
@@ -109,7 +138,7 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
 
     # Populate the array
     
-    bdata = data_dict['behave']['TRIALS_INFO']
+    bdata = data['bhv']['TRIALS_INFO']
     
     # Correct port for the second previous goal
     trials['2PG port'] = np.concatenate((np.zeros(2), \
@@ -157,11 +186,11 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     # Now we'll get the event times
     for ii in np.arange(len(b_onsets)):
         
-        times = data_dict['behave']['peh'][ii];
+        times = data['bhv']['peh'][ii];
         
         # Get previous goal times
         if ii > 0:
-            prev_times = data_dict['behave']['peh'][ii-1];
+            prev_times = data['bhv']['peh'][ii-1];
             
             if trials['PG outcome'][ii] == consts['HIT']:
                 pg_time = prev_times['states']['hit_istate'].min();
@@ -262,14 +291,14 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = True):
     # skipped before the recording data starts.
     #n_shift = 24;
 
-    sync = data_dict['sync'].map_n_to_b
+    sync = data['syn'].map_n_to_b
 
-    n_onsets = data_dict['onsets']/30000.
+    n_onsets = data['ons']/30000.
 
     trials_spikes = []
 
     # Loop over each cluster in the ePhys data
-    for cl in data_dict['clusters']:
+    for cl in data['cls']:
         spikes = [0]*len(b_onsets);
         
         p_times = cl['peaks'];
@@ -864,6 +893,8 @@ def cue_uncue(trials, spikes, bin_width = 0.2, range = (-7,1)):
             bin_width, range, label = 'Cued')
         plt.title(labels[ii])
         plt.xlim(range)
+        plt.xticks(size = 'large')
+        plt.yticks(size = 'large')
         ylims[ii]=plt.ylim()[1]
         
         dx = np.diff(x)[0]
@@ -881,13 +912,13 @@ def cue_uncue(trials, spikes, bin_width = 0.2, range = (-7,1)):
         
         # Now we need to check for significance
         # Plot a light gray rectangle where signficant
-        sigs = np.zeros(uncued.shape[1], dtype = 'bool')
-        for ii in np.arange(uncued.shape[1]):
-            sig = ut.ranksum_small(uncued[:,ii], cued[:,ii])
-            sigs[ii] = sig[2] | sig[3]
-            if sig[2] | sig[3]:
-                plt.fill_between([x[ii] - dx/2, x[ii]+dx/2], 0, 20, where = [True, True], 
-                    facecolor = 'k', edgecolor = 'none', alpha = 0.2, dashes = 'dashdot')
+        # sigs = np.zeros(uncued.shape[1], dtype = 'bool')
+#         for ii in np.arange(uncued.shape[1]):
+#             sig = ut.ranksum_small(uncued[:,ii], cued[:,ii])
+#             sigs[ii] = sig[1] <= 0.05
+#             if sig[1] <= 0.05:
+#                 plt.fill_between([x[ii] - dx/2, x[ii]+dx/2], 0, 20, where = [True, True], 
+#                     facecolor = 'k', edgecolor = 'none', alpha = 0.2, dashes = 'dashdot')
     
     plt.legend()
     ymax = np.max(ylims)
@@ -930,12 +961,15 @@ def _bar_fig(trials, spikes, low_event, high_event, title = None):
     low_event : the event 
     '''
     
-    if low_event in ['PG in', 'PG out', 'Center in', 'Center out', 'Response']:
+    lows = ['PG in', 'PG out', 'Center in', 'Center out', 'Response']
+    highs = ['PG out', 'Center in', 'Center out', 'Response', 'FG in']
+    
+    if low_event in lows:
         pass
     else:
         raise ValueError, '%s not a valid option for low_event' % low_event
         
-    if high_event in ['PG out', 'Center in', 'Center out', 'Response', 'FG in']:
+    if high_event in highs:
         pass
     else:
         raise ValueError, '%s not a valid option for high_event' % high_event
@@ -1083,8 +1117,68 @@ def _bar_fig(trials, spikes, low_event, high_event, title = None):
        
     plt.show() 
     
-    #return sigs
+
+def rate_by_trial(trials, spikes, low_event, high_event):
     
+    lows = ['PG in', 'PG out', 'Center in', 'Center out', 'Response']
+    highs = ['PG out', 'Center in', 'Center out', 'Response', 'FG in']
+    
+    if low_event in lows:
+        pass
+    else:
+        raise ValueError, '%s not a valid option for low_event' % low_event
+        
+    if high_event in highs:
+        pass
+    else:
+        raise ValueError, '%s not a valid option for high_event' % high_event
+    
+    # Calculate average firing rates between previous goal and response
+    x, avg_all, by_trial = peth(trials, spikes, range = (-20, 3), to_plot=0)
+    
+    n_spikes = by_trial/5.0
+    
+    spike_count = [0]*len(by_trial)
+
+    for ii, spks in enumerate(n_spikes):
+        # Grabbing spikes between events in the trials
+        
+        if low_event == 'PG in':
+            low = trials['PG time'][ii]
+        elif low_event == 'PG out':
+            low = trials['Leave PG'][ii]
+        elif low_event == 'Center in':
+            low = trials['C time'][ii][0]
+        elif low_event == 'Center out':
+            low = trials['C time'][ii][1]
+        elif low_event == 'Response':
+            low = trials['RS time'][ii]
+        
+        if high_event == 'PG out':
+            high = trials['Leave PG'][ii]
+        elif high_event == 'Center in':
+            high = trials['C time'][ii][0]
+        elif high_event == 'Center out':
+            high = trials['C time'][ii][1]
+        elif high_event == 'Response':
+            high = trials['RS time'][ii]
+        elif high_event == 'FG in':
+            high = trials['FG time'][ii]
+        
+        limits = ut.find((x>=low) & (x<=high))
+        
+        count = np.sum(spks[limits])
+        #1/0
+        spike_count[ii] = count
+    
+    events, spks = np.histogram(spike_count, bins = 40, range = (0,40))
+    
+    plt.plot(spks[:-1], events)
+    plt.show()
+    return spike_count
+    
+        
+
 def by_condition(trials,  PG = 'all', FG = 'all', block = 'all',
         outcome = 'all', pg_outcome = 'all', PPG = 'all'):
     '''  This method returns a list of the trial indices that fit the supplied conditions.

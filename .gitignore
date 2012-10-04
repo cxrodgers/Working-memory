@@ -3,6 +3,14 @@ Behavior/*
 .DS_Store
 AudioTools.py
 CWM019/
+ALY1A/
 KKFileSchema.*
 schema.*
 *.ipynb
+*.png
+*.dat
+*.bhv
+*.cls
+*.syn
+*.ons
+*.mat

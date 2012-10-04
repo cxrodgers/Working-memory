@@ -69,9 +69,9 @@ class Rat(object):
         records = [('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'),
         ('2PG outcome', 'i8'), ('PG outcome','i8'), ('FG outcome','i8'),
         ('PG time','f8',2), ('RS time', 'f8'), ('FG time', 'f8'),
-        ('C time', 'f8', 2), ('PG response','i8'), ('response','i8'),
-        ('trial length', 'f8'), ('stimulus', 'a20'), ('block', 'a8'), 
-        ('hits', 'u1'), ('errors', 'u1'), ('correct side', 'i8')]
+        ('C time', 'f8', 2)], ('PG response','i8'), ('response','i8'),
+        ('trial length', 'f8'), ('stimulus', 'a20'), ('block', 'i8'), 
+        ('hits', 'u1'), ('errors', 'u1')]
         
         n_trials = len(bdata['onsets'])
         
@@ -175,36 +175,3 @@ def get_data(filename):
     bcontrol.process_for_saving(bdata)
     
     return bdata
-    
-def streaks(rats):
-    
-    """ Okay, I want to find consecutive hits during uncued blocks 
-        
-        So, what I'll do first is grab the 
-        """
-    
-    d_list = []
-    for rat in rats.itervalues():
-        trials = rat.sessions['trials']
-        uncued = [ find(trial['block'] == 'uncued') for trial in trials ]
-        cued = [ find(trial['block'] == 'cued') for trial in trials ]
-        
-        un_blk_lens = [ np.diff(session)-1 for session in cued ]
-        un_blk_lens = np.array([ sess[find(sess != 0)] for sess in uncued_lens ])
-        
-        un_hits = [ trial['hits'][uncued[ii]] for ii, trial in enumerate(trials) ]
-        un_hits = [ find(hts == 1) for hts in un_hits ]
-        
-        # Grab the first block of uncued trials
-        un_blk_lens
-        
-        
-        d_list.append(diffs)
-    
-    return d_list
-		
-	
-	
-	
-	
-	

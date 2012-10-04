@@ -8,17 +8,6 @@ import pickle as pkl
 import bhv
 
 def timelock(datadir, tetrode, zero = 'RS'):
-    ''' temp '''
-    
-    
-    
-    ''' Sept 11, 2012, 6:37 PM:
-        This function will align time stamped spikes to a behavioral event.  Yes it will, I wonder if this will word wrap, no, so I should make it word wrap. 
-        
-        
-        
-        
-        '''
     
     filelist = os.listdir(datadir)
     filelist.sort()
@@ -49,7 +38,7 @@ def timelock(datadir, tetrode, zero = 'RS'):
     records = [('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'),
         ('2PG outcome', 'i8'), ('PG outcome','i8'), ('FG outcome','i8'),
         ('PG time','f8',2), ('RS time', 'f8'), ('FG time', 'f8'),
-        ('C time', 'f8', 2), ('PG response','i8'), ('Response','i8'),
+        ('C time', 'f8', 2)], ('PG response','i8'), ('Response','i8'),
         ('Trial length', 'f8'), ('Block', 'i8'), ('Scale', 'f8', 2)]
     
     nTrials = len(data['ons'])

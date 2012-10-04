@@ -3,16 +3,6 @@
 import cv
 from sklearn.cluster import KMeans
 
-#~ # Path to the video file
-#~ file_path = ''
-
-#~ # This grabs the video file and returns an object that you can grab frames from
-#~ video = cv.CaptureFromFile(file_path)
-
-#~ # The number of frames in the video and the frame rate
-#~ nFrames = cv.GetCaptureProperty(cap, 7)
-#~ frame_rate = cv.GetCaptureProperty(cap, 5)
-
 def detect_motion(capture):
     
     nFrames = cv.GetCaptureProperty(capture, 7)
@@ -27,63 +17,73 @@ def detect_motion(capture):
     frame_channels = frame.nChannels
     
     # Create a running average holder
-    running_average = cv.CreateImage(frame_size, cv.IPL_DEPTH_32F, 1)
+    running_average = cv.CreateImage(frame_size, cv.IPL_DEPTH_64F, 1)
     running_average_scaled = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_8U, 1 )
     
     # Greyscale image, thresholded to create the motion mask:
     grey_image = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_8U, 1 )
-    grey_image_test = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_8U, 1 )
+    post_process = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_8U, 1 )
+    contour_src = cv.CreateImage( cv.GetSize(frame), cv.IPL_DEPTH_8U, 1 )
     
     # Create an image for the difference
     difference = cv.CreateImage(cv.GetSize(frame), cv.IPL_DEPTH_8U, 1)
     
-    # Create a window so I can see what's going on
-    cv.NamedWindow('avg viewer')
-    cv.NamedWindow('pre viewer')
-    cv.NamedWindow('thresh viewer')
-    cv.NamedWindow('diff viewer')
     
     #motion = []
 
     while frame != None:
         
         # Convert the image to greyscale.
-        cv.CvtColor( frame, grey_image_test, cv.CV_RGB2GRAY )
-        
-        cv.Threshold( grey_image_test, grey_image_test, 220, 255, cv.CV_THRESH_BINARY )
+        cv.CvtColor( frame, grey_image, cv.CV_RGB2GRAY )
         
         # Smooth that frame!
-        cv.Smooth( grey_image_test, grey_image_test, cv.CV_GAUSSIAN, 3, 0)
+        cv.Smooth( grey_image, grey_image, cv.CV_GAUSSIAN, 9, 0)
+        
+        # Threhold the image to pull out the LEDs
+        cv.Threshold( grey_image, grey_image, 150, 255, cv.CV_THRESH_BINARY )
         
         # This sets averaging weight
-        a = 0.02
-        cv.RunningAvg(  grey_image_test, running_average, a, None )
+        a = 0.05
+        # Use the running avg as background
+        cv.RunningAvg(  grey_image, running_average, a, None )
         
-        # Convert the scale of the running average
         cv.ConvertScale( running_average, running_average_scaled, 1, 0)
         
-        # Subtract the current frame from the moving average
-        cv.AbsDiff( running_average_scaled, grey_image_test, difference)
+        # Subtract the background from the frame
+        cv.AbsDiff( running_average_scaled, grey_image, difference)
         
-        # Smooth that frame!
-        cv.Smooth( difference, difference, cv.CV_GAUSSIAN, 5, 0)
-        # Convert the image to greyscale.
-        #cv.CvtColor( difference, grey_image_test, cv.CV_RGB2GRAY )
-
+        cv.Smooth( difference, difference, cv.CV_GAUSSIAN,9, 0)
+        
         # Threshold the image to a black and white motion mask:
-        cv.Threshold( difference, grey_image, 100, 255, cv.CV_THRESH_BINARY )
+        cv.Threshold( difference, post_process, 50, 255, cv.CV_THRESH_BINARY )
         
-        # Smooth and threshold again to eliminate "sparkles"
-        #cv.Smooth( grey_image, grey_image, cv.CV_GAUSSIAN, 3, 0 )
-        #cv.Threshold( grey_image, grey_image, 2, 255, cv.CV_THRESH_BINARY )
+        # Find the contours of the LEDs
+        cv.Copy(post_process, contour_src)
         
-        # Store the difference image
-        #motion.append(difference)
+        contour_seq = cv.FindContours(contour_src, cv.CreateMemStorage(),
+            mode=cv.CV_RETR_EXTERNAL, method=cv.CV_CHAIN_APPROX_NONE)
+        cv.DrawContours(contour_src, contour_seq, cv.RGB(0, 0, 255), 
+            cv.RGB(0, 255, 0), 1)
         
-        cv.ShowImage('avg viewer', running_average_scaled)
-        cv.ShowImage('pre viewer', grey_image_test)
+        if 'centers' in locals():
+            km = KMeans(k = 2, init = centers)
+        else:
+            km = KMeans(k = 2)
+        try:
+            km.fit(contour_seq[:])
+            centers = km.cluster_centers_.astype(int)
+        except:
+            pass
+        #1/0
+        
+        cv.Circle(frame, tuple(centers[0]),10,cv.RGB(0,255,0))
+        cv.Circle(frame, tuple(centers[1]),10,cv.RGB(0,0,255))
+        
+        cv.ShowImage('avg viewer', contour_src)
+        cv.ShowImage('pre viewer', grey_image)
         cv.ShowImage('diff viewer', difference)
-        cv.ShowImage('thresh viewer', grey_image)
+        cv.ShowImage('post viewer', post_process)
+        cv.ShowImage('frame', frame)
         cv.WaitKey(10)
         
         # Grab the next frame for the next loop

@@ -573,7 +573,7 @@ class Spikesort(object):
         """
         
         if klusters == None:
-            klusters = np.arange(len(self.clusters));
+            klusters = np.arange(1, len(self.clusters));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist()
@@ -665,7 +665,7 @@ class Spikesort(object):
         """
         
         if klusters == None:
-            klusters = np.arange(len(self.clusters));
+            klusters = np.arange(1, len(self.clusters));
         
         if type(klusters) == np.ndarray:
             klusters = klusters.tolist()
