@@ -14,9 +14,9 @@ class Onsets(object):
     def __init__(self,onsets):
       self.audio_onsets = onsets
     
-behave_file = '/media/hippocampus/WM_data/CWM019/data_@TwoAltChoice_Memory_Mat_CWM019_120509a.mat' 
-neural_file = '/media/hippocampus/NDAQ/datafile_ML_CWM019_120509_001.ns5'
-save_as = 'CWM019_120509'
+behave_file = '/home/mat/Dropbox/Working-memory/ALY1A/data_@TwoAltChoice_Memory_Mat_ALY1A_120926a.mat' 
+neural_file = '/media/hippocampus/NDAQ/datafile_ML_ALY11_120926_001.ns5'
+save_as = 'ALY1A_120926'
 
 loader = ns5.Loader(neural_file)
 loader.load_header()
