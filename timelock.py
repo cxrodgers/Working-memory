@@ -434,7 +434,15 @@ def raster(trials, trial_spikes):
     # Each row is a different trial, each spikes should be marked 
     # as a vertical dash.
     ind = 1
-    for ii in np.arange(len(trial_spikes)):
+    
+    sorting = np.zeros(len(trials), dtype=[('indices', 'i8'), ('PG time','f8')])
+    
+    sorting['indices'] = range(0,len(trials))
+    sorting['PG time'] = trials['PG time']
+    sorting.sort(order='PG time')
+    sorting = sorting[::-1] 
+    
+    for ii in sorting['indices']:
         
         spikes = trial_spikes[ii]
         
@@ -1168,7 +1176,6 @@ def rate_by_trial(trials, spikes, low_event, high_event):
         limits = ut.find((x>=low) & (x<=high))
         
         count = np.sum(spks[limits])
-        #1/0
         spike_count[ii] = count
     
     events, spks = np.histogram(spike_count, bins = 40, range = (0,40))
@@ -1176,7 +1183,8 @@ def rate_by_trial(trials, spikes, low_event, high_event):
     plt.plot(spks[:-1], events)
     plt.show()
     return spike_count
-    
+
+def 
         
 
 def by_condition(trials,  PG = 'all', FG = 'all', block = 'all',
