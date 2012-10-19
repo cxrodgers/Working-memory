@@ -3,7 +3,8 @@
 from matplotlib.mlab import find
 import numpy as np
 from scipy.stats import mannwhitneyu
-from numpy.random import permutation
+from numpy.random import *
+
 
 def ranksum(samp1, samp2):
     ''' Calculates the U statistic and probability that the samples are from
@@ -154,5 +155,31 @@ def normal(x, mean, sig):
     norm = np.sqrt(2*np.pi*sig**2)
     
     return (expo / norm)
-
+    
+def bootstrap(data, param = 'mean', iters = 10000):
+    
+    param_out = []
+    
+    for samp in BootSample(0,len(data), iters):
+        
+        if param = 'mean':
+            samp_mean = np.mean(data[samp])
+            param_out.append(samp_mean)
+    
+    return param_out
+    
+class BootSample:
+    
+    def __init__(self, min, max, iters = 200):
+        self._min = min
+        self._max = max
+        self._iters = 200
+        
+    def __iter__(self):
+        return self.next()
+    
+    def next(self):
+        for ii in np.arange(self._iters):
+            samp = randint(self._min,self._max,randint(1,self._max,1))
+            yield samp
     
