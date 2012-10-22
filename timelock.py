@@ -8,13 +8,14 @@ import re
 import numpy as np
 import pickle as pkl
 import matplotlib.pyplot as plt
+import matplotlib.mlab as mlab
 import scipy.io
 from scipy.stats.mstats import zscore
 from itertools import combinations
 from numpy.linalg import norm
 import myutils as ut
 
-def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = False):
+def timelock(datadir, tetrode, time_zero = 'RS', n_shift = 0, scaled = False):
     """ This function takes the behavior and spiking data, then returns
     the spikes timelocked to the 'Response,' when the stimulus plays.
     
@@ -37,49 +38,6 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = False):
     A typical use would be "trials, spikes = timelock('/path/to/data')"
     """
     
-   # First we need to import the behavior and neural data, also the syncing
-#     # information.
-# 
-#     # Get list of files in datadir
-#     filelist = os.listdir(datadir);
-#     filelist.sort();
-# 
-#     # We need to be able to handle data across multiple data files.
-#     # So build a list of all the files and pull out relevant info.  
-#     reg = [ re.search('(\w+)_(\w+)_(\w+)_(\w+).dat',fname) for fname in filelist];
-# 
-#     # Okay, lets get all the different datafiles into a structure we can use.
-#     # Initialize the data dictionary.
-#     data = dict((('clusters',None), ('onsets',None), ('sync',None), 
-#         ('bhv',None)));
-# 
-#     # Populate the dictionary with our timing, behavior, and spiking information
-#     for ii in np.arange(len(reg)):
-#         if reg[ii] != None:
-#             if reg[ii].group(1) == 'clusters':
-#                 fin = open(datadir + reg[ii].group(0),'r')
-#                 data['clusters'] = pkl.load(fin)
-#                 fin.close()
-#             
-#             elif reg[ii].group(1) == 'onsets':
-#                 fin = open(datadir + reg[ii].group(0),'r')
-#                 data['onsets'] = pkl.load(fin)
-#                 fin.close()
-#         
-#             elif reg[ii].group(1) == 'sync':
-#                 fin = open(datadir + reg[ii].group(0),'r')
-#                 data['sync'] = pkl.load(fin)
-#                 fin.close()
-#             
-#             elif reg[ii].group(1) == 'bhv':
-#                 fin = open(datadir + reg[ii].group(0),'r')
-#                 data['bhv'] = pkl.load(fin)
-#                 fin.close()
-#             
-#             rat = reg[ii].group(2);
-#             date = reg[ii].group(3);
-        
-    tetrode = 2
 
     filelist = os.listdir(datadir)
     filelist.sort()
@@ -107,19 +65,6 @@ def timelock(datadir, time_zero = 'RS', n_shift = 0, scaled = False):
             if value == None:
                 raise Exception, '%s file wasn\'t loaded properly' % key
                 break
-    
-    #~ Need to build a big list of each trial.  For each trial, here is what we need:
-       
-        #~ Previous goal (PG) port
-        #~ Future goal (FG) port
-        #~ Previous outcome
-        #~ Future outcome
-        #~ PG time
-        #~ FG time
-        #~ The rat's response (right or left)
-        #~ All the spikes PG time to FG time
-
-    #~ Probably more, I'll list more as I think of them
 
     
     # Get the stimulus onset for each trial
@@ -675,7 +620,7 @@ def get_figs(trials, trial_spikes, bin_width = 0.2, range = (-7,1)):
     
     plt.show()
     
-def _generate_LLRR(data, bin_width, range):
+def _generate_LLRR(data, bin_width, range, fig_title = None):
     
     ylims=[0]*4
     titles = ['right->left', 'left->left', 'left->right', 'right->right']
@@ -730,23 +675,20 @@ def LLRR_figs(trials, spikes, bin_width = 0.2, range = (-7,1)):
     _generate_LLRR(cued, bin_width, range)
     
   
-    
 def cue_uncue(trials, spikes, bin_width = 0.2, range = (-7,1)):
     ''' This methods makes plots comparing cued and uncued PETHs '''
     
     conditions = [0]*8
-    conditions[0] = by_condition(trials, 'right', 'left', 'cued', 'hit')
-    conditions[1] = by_condition(trials, 'right', 'left', 'uncued', 'hit')
-    conditions[2] = by_condition(trials, 'left', 'left', 'cued', 'hit')
-    conditions[3] = by_condition(trials, 'left', 'left', 'uncued', 'hit')
-    conditions[4] = by_condition(trials, 'left', 'right', 'cued', 'hit')
-    conditions[5] = by_condition(trials, 'left', 'right', 'uncued', 'hit')
-    conditions[6] = by_condition(trials, 'right', 'right', 'cued', 'hit')
-    conditions[7] = by_condition(trials, 'right', 'right', 'uncued', 'hit')
-    
     c_spikes = [0]*8
-    for ii, cond in enumerate(conditions):
-        c_spikes[ii] = [ spikes[ind] for ind in cond ]
+    conditions[0], c_spikes[0] = by_condition(trials, spikes,'right', 'left', 'cued', 'hit')
+    conditions[1], c_spikes[1] = by_condition(trials, spikes,'right', 'left', 'uncued', 'hit')
+    conditions[2], c_spikes[2] = by_condition(trials, spikes,'left', 'left', 'cued', 'hit')
+    conditions[3], c_spikes[3] = by_condition(trials, spikes,'left', 'left', 'uncued', 'hit')
+    conditions[4], c_spikes[4] = by_condition(trials, spikes,'left', 'right', 'cued', 'hit')
+    conditions[5], c_spikes[5] = by_condition(trials, spikes,'left', 'right', 'uncued', 'hit')
+    conditions[6], c_spikes[6] = by_condition(trials, spikes,'right', 'right', 'cued', 'hit')
+    conditions[7], c_spikes[7] = by_condition(trials, spikes,'right', 'right', 'uncued', 'hit')
+    
     
     # Now plot all four on one figure
     plt.figure()
@@ -758,9 +700,9 @@ def cue_uncue(trials, spikes, bin_width = 0.2, range = (-7,1)):
         plt.subplot(220 + ii + 1)
         
         # Plot averaged PETHs
-        x, unavg, uncued = peth(trials[conditions[2*ii+1]], c_spikes[2*ii+1],
+        x, unavg, uncued = peth(conditions[2*ii+1], c_spikes[2*ii+1],
             bin_width, range, label = 'Uncued')
-        x, cuavg, cued = peth(trials[conditions[2*ii]], c_spikes[2*ii],
+        x, cuavg, cued = peth(conditions[2*ii], c_spikes[2*ii],
             bin_width, range, label = 'Cued')
         plt.title(labels[ii])
         plt.xlim(range)
@@ -823,17 +765,95 @@ def epoch_histogram(trials, spikes, low_event, high_event):
     plt.show()
     
     
-def epoch_scatter(trials, spikes):
-    
+def epoch_scatter(list_trials, list_spikes, compare):
+    ''' compare: valid options are 'PG', 'FG', 'block', 'repeats'
+    '''
     events = [('PG in', 'PG out'), ('PG out', 'Center in'), ('Center in', 'Center out'),
         ('Center out', 'FG in')]
     
-    epochs = [epoch(trials, spikes, ev[0], ev[1]) for ev in events]
+    comparisons = ['PG', 'FG', 'block', 'repeats']
+    if compare in comparisons:
+        pass
+    else:
+        raise ValueError, '%s not a valid option for compare' % compare
     
-    epoch(trials, spikes, ev[0], ev[1])
+    if type(list_spikes) != list:
+        list_spikes = [list_spikes]
+    if type(list_trials) != list:
+        list_trials = [list_trials]
+        
+    units = []
     
-    return
+    for trials, spikes in zip(list_trials, list_spikes):
+        #1/0
+        if compare == 'PG':
+            x_trls, x_spks = by_condition(trials, spikes, PG = 'left')
+            y_trls, y_spks = by_condition(trials, spikes, PG = 'right')
+            x_label = 'Avg rate, PG left'
+            y_label = 'Avg rate, PG right'
+        elif compare == 'FG':
+            x_trls, x_spks = by_condition(trials, spikes, FG = 'left')
+            y_trls, y_spks = by_condition(trials, spikes, FG = 'right')
+            x_label = 'Avg rate, FG left'
+            y_label = 'Avg rate, FG right'
+        elif compare == 'block':
+            x_trls, x_spks = by_condition(trials, spikes, block = 'cued')
+            y_trls, y_spks = by_condition(trials, spikes, block = 'uncued')
+            x_label = 'Avg rate, cued'
+            y_label = 'Avg rate, uncued'
+            
+        x_epochs = [epoch(x_trls, x_spks, ev[0], ev[1]) for ev in events]
+        y_epochs = [epoch(y_trls, y_spks, ev[0], ev[1]) for ev in events]
+        
+        x_mean = []
+        y_mean = []
+        
+        for ep in x_epochs:
+            
+            rates = np.array([ len(spks)/ep[1][ii]  for ii, spks in enumerate(ep[0]) ])
+            x_mean.append(_boot_mean(rates))
+        
+        for ep in y_epochs:
+            
+            rates = np.array([ len(spks)/ep[1][ii]  for ii, spks in enumerate(ep[0]) ])
+            y_mean.append(_boot_mean(rates))
+        
+        units.append((x_mean, y_mean))
+        
+    titles = ['In PG', 'PG to center', 'In center', 'Center to FG']
     
+    for ii in range(len(events)):
+        plt.figure()
+        for unit in units:
+            x_mean = unit[0]
+            y_mean = unit[1]
+            x, xconfs = x_mean[ii]
+            y, yconfs = y_mean[ii]
+            yerrlow = np.array([y - yconfs[0]])
+            yerrhigh = np.array([yconfs[1] - y])
+            xerrlow = np.array([x - xconfs[0]])
+            xerrhigh = np.array([xconfs[1] - x])
+            x = np.array([x])
+            y = np.array([y])
+            #1/0
+            plt.errorbar(x, y, yerr = [yerrlow, yerrhigh], xerr = [xerrlow, xerrhigh],
+                fmt='o', ecolor = 'grey', mfc = 'grey')
+            
+            plt.xlabel(x_label)
+            plt.ylabel(y_label)
+            plt.title(titles[ii])
+        plt.plot([0,plt.xlim()[1]], [0,plt.ylim()[1]], '--k')
+        plt.xlim(0,plt.xlim()[1])
+        plt.ylim(0,plt.ylim()[1])
+        plt.show()
+        
+    
+def _boot_mean(data):
+    boot = ut.bootstrap(data)
+    mean = np.mean(boot)
+    confidence = mlab.prctile(boot, p=(2.5, 97.5))
+    
+    return mean, confidence
     
 def epoch(trials, spikes, low_event, high_event):
     lows = ['PG in', 'PG out', 'Center in', 'Center out', 'Response']
@@ -880,11 +900,10 @@ def epoch(trials, spikes, low_event, high_event):
         duration.append(high - low)
         try:
             interval = ut.find((spks>=low) & (spks<=high))
+            section.append( spks[interval] )
         except ValueError:
             interval = 1
         
-        section.append( spks[interval] )
-    
     duration = np.array(duration)
     
     return section, duration
