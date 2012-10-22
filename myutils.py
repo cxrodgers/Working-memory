@@ -160,26 +160,28 @@ def bootstrap(data, param = 'mean', iters = 10000):
     
     param_out = []
     
+    if param == 'mean':
+        measure = np.mean()
+    
     for samp in BootSample(0,len(data), iters):
         
-        if param = 'mean':
-            samp_mean = np.mean(data[samp])
-            param_out.append(samp_mean)
+            samp_meas = measure(data[samp])
+            param_out.append(samp_meas)
     
     return param_out
     
 class BootSample:
     
-    def __init__(self, min, max, iters = 200):
+    def __init__(self, min, max, iters):
         self._min = min
         self._max = max
-        self._iters = 200
+        self._iters = iters
         
     def __iter__(self):
         return self.next()
     
     def next(self):
         for ii in np.arange(self._iters):
-            samp = randint(self._min,self._max,randint(1,self._max,1))
+            samp = randint(self._min, self._max, self._max)
             yield samp
     
