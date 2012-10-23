@@ -765,7 +765,7 @@ def epoch_histogram(trials, spikes, low_event, high_event):
     plt.show()
     
     
-def epoch_scatter(list_trials, list_spikes, compare):
+def epoch_scatter(list_trials, list_spikes, compare, measure_func = np.mean):
     ''' compare: valid options are 'PG', 'FG', 'block', 'repeats'
     '''
     events = [('PG in', 'PG out'), ('PG out', 'Center in'), ('Center in', 'Center out'),
@@ -811,12 +811,12 @@ def epoch_scatter(list_trials, list_spikes, compare):
         for ep in x_epochs:
             
             rates = np.array([ len(spks)/ep[1][ii]  for ii, spks in enumerate(ep[0]) ])
-            x_mean.append(_boot_mean(rates))
+            x_mean.append(_bootstrap(rates, measure_func))
         
         for ep in y_epochs:
             
             rates = np.array([ len(spks)/ep[1][ii]  for ii, spks in enumerate(ep[0]) ])
-            y_mean.append(_boot_mean(rates))
+            y_mean.append(_bootstrap(rates, measure_func))
         
         units.append((x_mean, y_mean))
         
@@ -843,13 +843,13 @@ def epoch_scatter(list_trials, list_spikes, compare):
             plt.ylabel(y_label)
             plt.title(titles[ii])
         plt.plot([0,plt.xlim()[1]], [0,plt.ylim()[1]], '--k')
-        plt.xlim(0,plt.xlim()[1])
-        plt.ylim(0,plt.ylim()[1])
+        #plt.xlim(0,plt.xlim()[1])
+        #plt.ylim(0,plt.ylim()[1])
         plt.show()
         
     
-def _boot_mean(data):
-    boot = ut.bootstrap(data)
+def _bootstrap(data, measure_func = np.mean):
+    boot = ut.bootstrap(data, measure_func)
     mean = np.mean(boot)
     confidence = mlab.prctile(boot, p=(2.5, 97.5))
     
