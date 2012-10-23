@@ -8,14 +8,32 @@ from numpy.random import *
 
 def ranksum(samp1, samp2):
     ''' Calculates the U statistic and probability that the samples are from
-    two different distributions.
+    two different distributions.  These tests are non-parametric, so you can
+    use them if your sample distributions are not Gaussian.  The null hypothesis
+    for the test is that the two samples come from the same distribution, so
+    if p is less than some cutoff, you can reject the null hypothesis and claim
+    the samples come from different distributions, that is, one sample is ranked
+    higher (for instance, larger times, higher spiking rates) than the other sample.
     
     For small sample sizes (n, m <30), the U statistic is calculated directly.
-    The probability is found from a chart, at the p<0.05 level.
+    The probability is found from a table, at the p<0.05 level.
     
     For large sample sizes (n, m >30), the U statistic and probability are
     calculated using scipy.stats.mannwhitneyu which uses a normal approximation.
     
+    Parameters
+    ----------
+    samp1 : array like
+        A 1D array of the sample data
+    samp2 : array like
+        A 1D array of the sample data
+        
+    Returns
+    -------
+    U : int
+        The smaller U statistic of the sample
+    p : float
+        The probability that the null hypothesis is true.
     '''
     
     if (len(samp1) <= 30) & (len(samp2) <= 30):
@@ -27,6 +45,23 @@ def ranksum_small(samp1, samp2):
     ''' This function tests the null hypothesis that two related samples come
     from the same distribution.  This function is for sample sizes < 20, 
     otherwise use scipy.stats.mannwhitneyu or scipy.stats.ranksums, etc.
+    
+    Parameters
+    ----------
+    samp1 : array like
+        A 1D array of the sample data
+    samp2 : array like
+        A 1D array of the sample data
+        
+    Returns
+    -------
+    U : int
+        The smaller U statistic of the sample
+    p : float
+        The probability that the null hypothesis is true.  Since p is
+        found from a lookup table, p = 0.05 if U is smaller than the
+        critical value, p = 1 otherwise.
+        
     '''
     
     #~ if np.mean(samp1) > np.mean(samp2):
@@ -156,21 +191,85 @@ def normal(x, mean, sig):
     
     return (expo / norm)
     
-def bootstrap(data, param = 'mean', iters = 10000):
+def kurtosis(data):
     
-    param_out = []
+    mu = np.mean(data)
+    pdf, x = np.histogram(data, bins = 100, range = (0,100), density = True)
     
-    if param == 'mean':
-        measure = np.mean()
+    x = x[:-1] + 0.5
+    # Subtracting 3 for excess kurtosis
+    try:
+        kurt = np.sum((x-mu)**4*pdf)/np.std(data)**4 - 3
+        return kurt
+    except:
+        pass
     
-    for samp in BootSample(0,len(data), iters):
+
+def kurtosis2(data):
+    
+    mu = np.mean(data)
+    n = float(len(data))
+    numer = sum((data-mu)**4)/n
+    denom = (sum((data-mu)**2)/n)**2
+    try:
+        kurt = numer/denom - 3
+        return kurt
+    except:
+        pass
+    
+    
+def bootstrap(data, measure_func, iters = 10000):
+    ''' Compute the distribution of a statistic (mean, variance, etc.)
+        using the bootstrapping method, sampling with replacement.
         
-            samp_meas = measure(data[samp])
-            param_out.append(samp_meas)
+        Parameters
+        ----------
+        
+        data : array like
+            The input sampled data.
+        measure_func : function
+            The function for the statistic that will be calculated from
+            bootstrap samples.  For instance, if you want to calculate the
+            distribution of the means of the sample, use np.mean() for
+            measure_func.
+        iters : int
+            The number of bootstrapping samples you want to get from your
+            data.  Higher is better, default is 10000.
+            
+        Returns
+        -------
+        out : np.array
+            The output of measure_func for each of the bootstrap samples.
+        
+    '''
+
+    measure = measure_func
     
-    return param_out
+    out = [ measure(data[samp]) for samp in BootSample(0,len(data), iters) ]
+    
+    return np.array(out)
     
 class BootSample:
+    ''' A generator used for bootstrapping.  It (pseudo)randomly generates
+        an array of integers that can be used to resample data.
+        
+        Parameters
+        ----------
+        min : int
+            The minimum integer to return in the output array.
+        max : int
+            The maximum integer to return in the output array.  Also,
+            the length of the output array.
+        iters : int
+            The number of iterations before the generator runs out.
+        
+        Returns
+        -------
+        out : np.array
+            Yields an np.array of pseudorandom integers.  The array
+            is max integers long, the integers are between min and max.
+    
+    '''
     
     def __init__(self, min, max, iters):
         self._min = min
