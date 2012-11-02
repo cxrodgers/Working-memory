@@ -66,12 +66,13 @@ class Rat(object):
         bdata = self._data[date]
         consts = bdata['CONSTS']
         
-        records = [('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'),
+        records = [('outcome', 'i8'), ('response','i8'), ('stimulus', 'a20'), 
+        ('block', 'a8'), ('hits', 'u1'), ('errors', 'u1'), ('correct side', 'i8'), 
+        ('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'),
         ('2PG outcome', 'i8'), ('PG outcome','i8'), ('FG outcome','i8'),
         ('PG time','f8',2), ('RS time', 'f8'), ('FG time', 'f8'),
-        ('C time', 'f8', 2), ('PG response','i8'), ('response','i8'),
-        ('trial length', 'f8'), ('stimulus', 'a20'), ('block', 'a8'), 
-        ('hits', 'u1'), ('errors', 'u1'), ('correct side', 'i8')]
+        ('C time', 'f8', 2), ('2PG response'), ('PG response','i8'), ('response','i8'),
+        ('Trial length', 'f8'), ('block', 'i8')]
         
         n_trials = len(bdata['onsets'])
         
@@ -86,12 +87,10 @@ class Rat(object):
         
         trials_info = bdata['TRIALS_INFO'][:n_trials]
         
-        trials['FG outcome'] = trials_info['OUTCOME']
+        trials['outcome'] = trials_info['OUTCOME']
         trials['hits'] = trials_info['OUTCOME'] == consts['HIT']
         trials['errors'] = trials_info['OUTCOME'] == consts['ERROR']
-        
         trials['correct side'] = trials_info['CORRECT_SIDE']
-        
         trials['stimulus'] = np.array([ stimuli[x] for x in trials_info['STIM_NUMBER']])
         
         # Will need to fix this...
@@ -103,6 +102,15 @@ class Rat(object):
         swap = {1:2, 2:1}
         swapped_sides = np.array([swap[t] for t in incorrect_side], dtype = 'uint8') 
         trials['response'][find(trials['errors'])] = swapped_sides
+        
+        trials['FG port'] = trials['correct side']
+        trials['PG port'] = cat(np.zeros(1), trials['FG port'][:-1])
+        trials['2PG port'] = cat(np.zeros(2), trials['FG port'][:-2])
+        trials['FG outcome'] = trials['outcome']
+        trials['PG outcome'] = cat(np.zeros(1), trials['FG outcome'][:-1])
+        trials['2PG outcome'] = cat(np.zeros(2), trials['FG outcome'][:-2])
+        trials['PG response'] = cat(np.zeros(1), trials['response'][:-1])
+        trials['2PG response'] = cat(np.zeros(2), trials['response'][:-2])
         
         return trials
         

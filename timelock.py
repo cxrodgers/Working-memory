@@ -765,7 +765,7 @@ def epoch_histogram(trials, spikes, low_event, high_event):
     plt.show()
     
     
-def epoch_scatter(list_trials, list_spikes, compare, measure_func = np.mean):
+def epoch_scatter(list_trials, list_spikes, compare, measure_func = np.mean, label = 'Avg rate'):
     ''' compare: valid options are 'PG', 'FG', 'block', 'repeats'
     '''
     events = [('PG in', 'PG out'), ('PG out', 'Center in'), ('Center in', 'Center out'),
@@ -789,18 +789,18 @@ def epoch_scatter(list_trials, list_spikes, compare, measure_func = np.mean):
         if compare == 'PG':
             x_trls, x_spks = by_condition(trials, spikes, PG = 'left')
             y_trls, y_spks = by_condition(trials, spikes, PG = 'right')
-            x_label = 'Avg rate, PG left'
-            y_label = 'Avg rate, PG right'
+            x_label = label + ', PG left'
+            y_label = label + ', PG right'
         elif compare == 'FG':
             x_trls, x_spks = by_condition(trials, spikes, FG = 'left')
             y_trls, y_spks = by_condition(trials, spikes, FG = 'right')
-            x_label = 'Avg rate, FG left'
-            y_label = 'Avg rate, FG right'
+            x_label = label + ', FG left'
+            y_label = label + ', FG right'
         elif compare == 'block':
             x_trls, x_spks = by_condition(trials, spikes, block = 'cued')
             y_trls, y_spks = by_condition(trials, spikes, block = 'uncued')
-            x_label = 'Avg rate, cued'
-            y_label = 'Avg rate, uncued'
+            x_label = label + ', cued'
+            y_label = label + ', uncued'
             
         x_epochs = [epoch(x_trls, x_spks, ev[0], ev[1]) for ev in events]
         y_epochs = [epoch(y_trls, y_spks, ev[0], ev[1]) for ev in events]

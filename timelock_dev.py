@@ -13,11 +13,16 @@ def timelock(datadir, tetrode, zero = 'RS'):
     
     
     ''' Sept 11, 2012, 6:37 PM:
-        This function will align time stamped spikes to a behavioral event.  Yes it will, I wonder if this will word wrap, no, so I should make it word wrap. 
+        This function will align time stamped spikes to a behavioral event.
+        First, it will look through a data directory containing four files, the
+        files are behavior data, spiking data, onsets from the spike recording
+        system, and syncing information between the behavior and recording
+        onsets.
         
-        
-        
-        
+        So we'll load those files, then pull out behavior information using the
+        Rat class from bhv.py.  From that data, we have the times of events
+        which we can then use to set a time zero for each trial.  Based on that
+        time zero, we'll shift the spike times appropriately.        
         '''
     
     filelist = os.listdir(datadir)
