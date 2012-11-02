@@ -249,7 +249,7 @@ def bootstrap(data, measure_func, iters = 10000):
     
     return np.array(out)
     
-class BootSample:
+class BootSample(object):
     ''' A generator used for bootstrapping.  It (pseudo)randomly generates
         an array of integers that can be used to resample data.
         
