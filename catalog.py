@@ -54,7 +54,7 @@ class Session(Base):
         self.date = date
     
     def __repr__(self):
-        return "<Session(%s, %s)>" % self.rat, self.date
+        return "<Session(%s, %s)>" % (self.rat, self.date)
 
 class Unit(Base):
     '''
@@ -91,6 +91,14 @@ class Unit(Base):
         return "<Unit(%s, %s,tetrode %s,cluster %s)>" \
             % (self.id, self.session, self.tetrode, self.cluster)
 
+####################################################################################
+
+class ExistsError(Exception):
+    pass
+    
+####################################################################################
+
+# Actual catalog object here
 
 class Catalog(object):
     
@@ -98,6 +106,7 @@ class Catalog(object):
         
         self.engine = create_engine('sqlite://'+database, echo = echo)
         self._ConnectGen = sessionmaker(bind=self.engine)
+        self.connection = self._ConnectGen()
         
         Base.metadata.create_all(self.engine)
     
@@ -106,15 +115,15 @@ class Catalog(object):
             by a sessionmaker bound to self.engine '''
         
         connection = self._ConnectGen()
+        
         return connection
     
     def start_project(self, project, researcher = None):
         ''' Start a project and add it to the database '''
         
-        conn = self.open()
+        conn = self.connection
         conn.add(Project(project, researcher))
         conn.commit()
-        conn.close()
     
     def get_project(self, project, connection=None):
         ''' Returns a Project
@@ -135,40 +144,25 @@ class Catalog(object):
         
         '''      
         
-        close = False
-        if connection == None:
-            close = True
-            conn = self.open()
+        conn = self.connection
         
         try:
             proj = conn.query(Project).filter(Project.project == project).one()
         except NoResultFound:
-            raise Exception("Project %s doesn't exist, create it first." % project)
-            
-            
-        if close:
-            conn.close()
+            raise NoResultFound("Project %s doesn't exist, create it first." % project)
             
         return proj
     
     def get_session(self, rat, date, connection=None):
         ''' Returns a Session from the specified rat and date'''
         
-        close = False
-        if connection == None:
-            close = True
-            conn = self.open()
-        
-        
+        conn = self.connection
+    
         try:
             session = conn.query(Session).filter(Session.rat==rat).\
                 filter(Session.date==date).one()
         except NoResultFound:
-            session = None
-            
-        
-        if close:
-            conn.close()
+            raise NoResultFound("Session doesn't exist")
         
         return session
         
@@ -177,52 +171,130 @@ class Catalog(object):
         ''' Add a unit to a project '''
         
         # First, we'll check if the unit already exists
-        unit = self.get_unit(rat, date, tetrode, cluster)
+        try:
+            unit = self.get_unit(rat, date, tetrode, cluster)
+            raise ExistsError("Unit already exists")
+        except NoResultFound:
+            pass
         
-        conn = self.open()
+        conn = self.connection
         
         proj = self.get_project(project)
         
-        session = self.get_session(rat, date)
-        if session == None:
-            session = Session(proj, rate, date)
+        try:
+            session = self.get_session(rat, date)
+        except NoResultFound:
+            session = Session(proj, rat, date)
         
         unit = Unit(session, tetrode, cluster)
         conn.commit()
-    
-        #self.update_unit(unit.id, **kwargs)
         
-        conn.close()
+        #~ if kwargs:
+            #~ self.update_unit(unit.id, **kwargs)
     
-    def get_unit(self, rat, date, tetrode, cluster):
-        '''Return the unit id specified by the project, rate, date, tetrode, cluster
-            Should I just have it return the unit object???
+    def get_unit(self, *args, **kwargs):
         '''
-        conn = self.open()
-        session = self.get_session(rat, date)
+        Returns unit given by the unit id, or by the rat name, date, tetrode, cluster.
         
-        try:
-            unit = conn.query(Unit).\
-                filter(and_(Unit.session==session, Unit.tetrode==tetrode, 
-                Unit.cluster==cluster))
-        except NoResultFound:
-            print "The unit doesn't exist"
+        Parameters
+        ----------
         
-        conn.close()
-        return unit
+        unit_id : int
+            the unit id of the unit you want
         
+        or
+        
+        rat : str
+            the name of the rat
+        date : str
+            the date the unit was recorded
+        tetrode : int
+            the tetrode the unit is from
+        cluster : int
+            the cluster from the tetrode
+        '''
+        
+        conn = self.connection
     
-
-    def update_unit(self, unit_id, **kwargs):
-        ''' Update a unit already in the database '''
+        valid_types = [type(''), type(''), type(1), type(1)]
+        arg_types = [ type(arg) for arg in args ]
         
-        # Doing it this way so that when you change the attributes of the
-        # Unit class, the valid keys here will change automatically
+        if (len(args)==1) & (type(args[0]) == type(1)):
+            # Assuming the argument is a unit id
+            unit = conn.query(Unit).filter(Unit.id == args[0]).one()
+        elif (len(args)==4) & (arg_types == valid_types):
+            # Assuming the argument is of the form [rat, date, tetrode, cluster]
+            rat = args[0]
+            date = args[1]
+            tetrode = args[2]
+            cluster = args[3]
+            
+            unit = conn.query(Unit).join(Session).\
+                filter(Session.rat == rat).filter(Session.date == date).\
+                filter(Unit.tetrode == tetrode).filter(Unit.cluster == cluster).\
+                one()
+        elif (len(args)==4) & (arg_types != valid_types):
+            raise ValueError('Input arguments do not conform to valid types')
+        else:            
+            raise ValueError('len(args) == 1 or 4')
+            
+        
+        return unit
+
+    def update_unit(self, *args, **kwargs):
+        ''' Update a unit already in the database 
+        
+        Parameters
+        ----------
+        args:
+        
+        unit_id : int
+            the unit id of the unit you want
+        
+        or
+        
+        rat : str
+            the name of the rat
+        date : str
+            the date the unit was recorded
+        tetrode : int
+            the tetrode the unit is from
+        cluster : int
+            the cluster from the tetrode
+            
+        or 
+        
+        unit : Catalog.Unit object
+            the Unit object you want to update
+        
+        >>KEYWORDS<<
+        The attributes of Unit
+        path : path to the folder containing all the data
+        falsePositive : false positive rate, from cluster metrics
+        falseNegative : false negative rate, from cluster metrics
+        notes : any notes about the unit
+        depth : depth at which the unit was recorded
+        
+        The keywords in the documentation might not be updated along
+        with the attributes of the Unit class.  However, the valid keywords
+        in the code will always update with the Unit class attributes, so any
+        attribute of the Unit class will be available through this method.
+        
+        '''
+        
+        
+        # Doing it this way so that if the attributes of the
+        # Unit class are changed, the valid keys here will change automatically
         valid_keys = [key for key in dir(Unit) if key[0]!='_']
         excise = ['metadata', 'id', 'session', 'session_id']  # don't want these to be accessed
         for exc in excise:
             valid_keys.remove(exc)
-            
+        
+        if type(args[0]) == Unit:
+            unit = args[0]
+        else:
+            unit = self.get_unit(*args)
+        
         if kwargs:
             for key in kwargs.iterkeys():
                 if key in valid_keys:
@@ -230,6 +302,6 @@ class Catalog(object):
                 else:
                     raise NameError('%s not a valid keyword' % key)
         
+        for key in kwargs.iterkeys():
+            setattr(unit, key, kwargs[key])
         
-        pass
-
