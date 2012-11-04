@@ -189,8 +189,8 @@ class Catalog(object):
         unit = Unit(session, tetrode, cluster)
         conn.commit()
         
-        #~ if kwargs:
-            #~ self.update_unit(unit.id, **kwargs)
+        if kwargs:
+            self.update_unit(unit, **kwargs)
     
     def get_unit(self, *args, **kwargs):
         '''
