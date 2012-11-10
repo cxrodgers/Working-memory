@@ -9,7 +9,7 @@ import scipy.signal as sig
 from sklearn.decomposition import PCA
 import matplotlib.pylab as plt
 from sklearn import mixture
-import pickle as pkl
+import cPickle as pkl
 from multiprocessing import Process
 
 # A class used for spike sorting.
@@ -1112,3 +1112,62 @@ def trace_plot(data, ylim):
     plt.xticks(fontsize = 'large')
     plt.yticks(alpha = 0)
     plt.ylim(ylim)
+    
+def durations():
+    
+    import os
+    import re
+    from matplotlib.mlab import find
+    
+    save_file = 'durations.pkl'
+    save_dir = '/Dropbox/Working-memory/Metadata/'
+    
+    # I don't like regex...
+    datadir = '/media/hippocampus/NDAQ'
+    filelist = os.listdir(datadir)
+    ML = find(['ML' in filename for filename in filelist])
+    data = [ filelist[ind] for ind in data ]
+    # Now I have a list of the filenames for all of my data
+    
+    # But, I only want the ns5 data, so do the same thing again.
+    ns5 = find(['.ns5' in filename for filename in data])
+    data = [ data[ind] for ind in ns5 ]
+    
+    # Let's check if we've already done this for some data so we
+    # don't do it twice.
+    
+    check_files = os.listdir(save_dir)
+    if save_file in check_files:
+        with open(save_file,'r') as f:
+            info_list = pkl.load(f)
+        for file in data:
+            reg=re.search('datafile_ML_(\w+)_(\w+)_001_.ns5', file)
+            rat = reg.group[1]
+            date = reg.group[2]
+            
+            for info in info_list:
+                if (info['rat'] == rat) & (info['date'] == date):
+                    info_list.remove(info)
+    else:
+        info_list = []
+
+    for file in data:
+        sorter = Spikesort(file)
+        sorter.load_data([16])
+        samples = len(sorter.raw_chans[0])
+        sample_rate = 30000
+        
+        duration = samples/float(sample_rate)
+        
+        reg=re.search('datafile_ML_(\w+)_(\w+)_001_.ns5', file)
+        rat = reg.group[1]
+        date = reg.group[2]
+        
+        info = {'rat':rat, 'date':date, 'duration':duration}
+        info_list.append(info)
+    
+    with open(''.join([save_dir,save_file]), 'w') as f:
+        pkl.dump(info_list, f)
+    
+    
+    
