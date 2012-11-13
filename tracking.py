@@ -27,9 +27,6 @@ def detect_motion(capture):
     
     # Create an image for the difference
     difference = cv.CreateImage(cv.GetSize(frame), cv.IPL_DEPTH_8U, 1)
-    
-    
-    #motion = []
 
     while frame != None:
         
@@ -51,7 +48,6 @@ def detect_motion(capture):
         
         # Subtract the background from the frame
         cv.AbsDiff( running_average_scaled, grey_image, difference)
-        
         cv.Smooth( difference, difference, cv.CV_GAUSSIAN,9, 0)
         
         # Threshold the image to a black and white motion mask:
@@ -60,25 +56,37 @@ def detect_motion(capture):
         # Find the contours of the LEDs
         cv.Copy(post_process, contour_src)
         
+        # The idea with this next part is that we can find the contours around
+        # the light blobs and they will be circles, or ovals, or peanut shapes.
+        # Then if you do k-means, you should get back the centers of the blobs.
+        # Find the contours around our lights
         contour_seq = cv.FindContours(contour_src, cv.CreateMemStorage(),
             mode=cv.CV_RETR_EXTERNAL, method=cv.CV_CHAIN_APPROX_NONE)
         cv.DrawContours(contour_src, contour_seq, cv.RGB(0, 0, 255), 
             cv.RGB(0, 255, 0), 1)
         
+        # Fit k-means to the found contours
         if 'centers' in locals():
+            # If we initialize k-means from the found centers of the previous
+            # frame, hopefully it'll grab onto the light blobs and not other
+            # blobs elsewhere in the frame
             km = KMeans(k = 2, init = centers)
         else:
             km = KMeans(k = 2)
         try:
+            # Sometimes no contours are found, so you can't fit k-means
             km.fit(contour_seq[:])
             centers = km.cluster_centers_.astype(int)
         except:
+            # So just keep the same k-means centers for this frame and maybe
+            # later you can interpolate
             pass
-        #1/0
         
+        # Draw circles at the k-means centers
         cv.Circle(frame, tuple(centers[0]),10,cv.RGB(0,255,0))
         cv.Circle(frame, tuple(centers[1]),10,cv.RGB(0,0,255))
         
+        # This is just showing the different steps of the analysis
         cv.ShowImage('avg viewer', contour_src)
         cv.ShowImage('pre viewer', grey_image)
         cv.ShowImage('diff viewer', difference)
