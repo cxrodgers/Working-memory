@@ -1120,13 +1120,13 @@ def durations():
     from matplotlib.mlab import find
     
     save_file = 'durations.pkl'
-    save_dir = '/Dropbox/Working-memory/Metadata/'
+    save_dir = '/home/mat/Dropbox/Working-memory/Metadata/'
     
     # I don't like regex...
     datadir = '/media/hippocampus/NDAQ'
     filelist = os.listdir(datadir)
     ML = find(['ML' in filename for filename in filelist])
-    data = [ filelist[ind] for ind in data ]
+    data = [ filelist[ind] for ind in ML ]
     # Now I have a list of the filenames for all of my data
     
     # But, I only want the ns5 data, so do the same thing again.
@@ -1141,9 +1141,9 @@ def durations():
         with open(save_file,'r') as f:
             info_list = pkl.load(f)
         for file in data:
-            reg=re.search('datafile_ML_(\w+)_(\w+)_001_.ns5', file)
-            rat = reg.group[1]
-            date = reg.group[2]
+            reg=re.search('datafile_ML_(\w+)_(\w+)_001.ns5', file)
+            rat = reg.group(1)
+            date = reg.group(2)
             
             for info in info_list:
                 if (info['rat'] == rat) & (info['date'] == date):
@@ -1152,16 +1152,20 @@ def durations():
         info_list = []
 
     for file in data:
-        sorter = Spikesort(file)
-        sorter.load_data([16])
-        samples = len(sorter.raw_chans[0])
+        filepath = os.path.join(datadir,file)
+        print "Loading %s" % file
+        loader = ns5.loader(filepath)
+        loader.load_header()
+        print "File %s loaded" % file
+        samples = loader.header.n_samples
         sample_rate = 30000
         
         duration = samples/float(sample_rate)
+        print 'Duration is %s' % duration
         
-        reg=re.search('datafile_ML_(\w+)_(\w+)_001_.ns5', file)
-        rat = reg.group[1]
-        date = reg.group[2]
+        reg=re.search('datafile_ML_(\w+)_(\w+)_001.ns5', file)
+        rat = reg.group(1)
+        date = reg.group(2)
         
         info = {'rat':rat, 'date':date, 'duration':duration}
         info_list.append(info)
