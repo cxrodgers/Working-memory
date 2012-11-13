@@ -32,7 +32,8 @@ Notice that the last line must end with a newline or carriage return.
 import cPickle
 import numpy as np
 import os.path
-import shutil
+from os import listdir
+from matplotlib.mlab import find
 
 class UniqueError(Exception):
     pass
@@ -46,70 +47,87 @@ def unique_or_error(a):
     else:
         return u[0]
 
+ratname = 'ALY1A'
+topdir = '/home/mat/Dropbox/Working-memory'
+dirlist = listdir(os.path.join(topdir,ratname))
+dir_test = [ os.path.isdir(os.path.join(topdir, ratname, fil)) for fil in dirlist ]
+dates = [ dirlist[ind] for ind in find(dir_test) ]
+pjoin = os.path.join
+psplitext = os.path.splitext
 
-data_dir = '/home/mat/Dropbox/Working-memory/CWM019/120508/'
-filename = 'clusters_CWM019_120508_tet2.dat'
 f_samp = 30e3
-output_dir = data_dir
-basename = os.path.splitext(filename)[0]
-group = 1 # tetrode 1
 
-# load data
-dorun = False
-try:
-    data
-except NameError:
-    dorun = True
-if dorun:
-    with file(os.path.join(data_dir, filename)) as fi:
-        data = cPickle.load(fi)
-n_features = unique_or_error([d['pca'].shape[1] for d in data])
-n_clusters = len(data)
-
-
-# filenames
-fetfilename = os.path.join(output_dir, basename + '.fet.%d' % group)
-clufilename = os.path.join(output_dir, basename + '.clu.%d' % group)
-spkfilename = os.path.join(output_dir, basename + '.spk.%d' % group)
-#~ if os.path.exists(fetfilename):
-    #~ shutil.copyfile(fetfilename, fetfilename + '~')
-#~ if os.path.exists(clufilename):
-    #~ shutil.copyfile(clufilename, clufilename + '~')
-
-# write fetfile
-with file(fetfilename, 'w') as fetfile:
-    # Write an extra feature for the time
-    fetfile.write('%d\n' % (n_features+1))
+# I'm going to loop through date folders and tetrodes in those folders
+for date in dates:
     
-    # Write one cluster at a time
-    for d in data:
-        to_write = np.hstack([d['pca'], 
-            np.rint(d['peaks'][:, None] * f_samp).astype(np.int)])    
-        fmt = ['%f'] * n_features + ['%d']
-        np.savetxt(fetfile, to_write, fmt=fmt)
-
-# write clufile
-with file(clufilename, 'w') as clufile:
-    clufile.write('%d\n' % n_clusters)
-    for n, d in enumerate(data):
-        np.savetxt(clufile, n * 
-            np.ones(len(d['peaks']), dtype=np.int), fmt='%d')
-
-# write spkfile
-with file(spkfilename, 'w') as spkfile:
+    data_dir = pjoin(topdir,ratname,date)
     
-    clst_wvs = [0]*len(data)
-    for ii, clst in enumerate(data):
-        # This gets each waveform into the format needed for the KlustaKwik
-        # spike file format
-        cl_spks = np.concatenate( [ np.reshape( np.reshape( wvform, \
-            (4, len(wvform)/4)), len(wvform), order ='F') \
-            for wvform in clst['waveforms'] ] )
+    # Find the tetrodes we're dealing with
+    files  = listdir(data_dir)
+    
+    # Sorry this is gross, maybe there's a better way to get out only the .cls files?
+    clsfiles = [files[ind] for ind in find([ '.cls' in f for f in files ])]
+    
+    # If clsfiles is not empty, keep going
+    if clsfiles:
+        pass
+    # Otherwise, skip this loop and go to the next
+    else:
+        continue
+    
+    for filename in clsfiles:
         
-        clst_wvs[ii] = (cl_spks/(8192.0/2.**16)).astype(np.int16)
-        
-    spks = np.concatenate(clst_wvs)
-    
-    spks.tofile(spkfile)
+        # Assuming the filename is foo.cls.%d, where %d is the tetrode number
+        tetrode = int(filename[-1])
+        basename = psplitext(filename[:-2])[0]
+
+        with file(os.path.join(data_dir, filename)) as fi:
+            data = cPickle.load(fi)
+        # Sanitize data...  if a cluster is empty, it'll show up as an int == 0
+        int_test = [ type(datum['pca'])!=type(1) for datum in data ]
+        data = [ data[ind] for ind in find(int_test) ]
+        n_features = unique_or_error([d['pca'].shape[1] for d in data])
+        n_clusters = len(data)
+
+
+        # filenames
+        fetfilename = os.path.join(data_dir, basename + '.fet.%d' % tetrode)
+        clufilename = os.path.join(data_dir, basename + '.clu.%d' % tetrode)
+        spkfilename = os.path.join(data_dir, basename + '.spk.%d' % tetrode)
+
+        # write fetfile
+        with file(fetfilename, 'w') as fetfile:
+            # Write an extra feature for the time
+            fetfile.write('%d\n' % (n_features+1))
+            
+            # Write one cluster at a time
+            for d in data:
+                to_write = np.hstack([d['pca'], 
+                    np.rint(d['peaks'][:, None] * f_samp).astype(np.int)])    
+                fmt = ['%f'] * n_features + ['%d']
+                np.savetxt(fetfile, to_write, fmt=fmt)
+
+        # write clufile
+        with file(clufilename, 'w') as clufile:
+            clufile.write('%d\n' % n_clusters)
+            for n, d in enumerate(data):
+                np.savetxt(clufile, n * 
+                    np.ones(len(d['peaks']), dtype=np.int), fmt='%d')
+
+        # write spkfile
+        with file(spkfilename, 'w') as spkfile:
+            
+            clst_wvs = [0]*len(data)
+            for ii, clst in enumerate(data):
+                # This gets each waveform into the format needed for the KlustaKwik
+                # spike file format
+                cl_spks = np.concatenate( [ np.reshape( np.reshape( wvform, \
+                    (4, len(wvform)/4)), len(wvform), order ='F') \
+                    for wvform in clst['waveforms'] ] )
+                
+                clst_wvs[ii] = (cl_spks/(8192.0/2.**16)).astype(np.int16)
+                
+            spks = np.concatenate(clst_wvs)
+            spks.tofile(spkfile)
 
 
