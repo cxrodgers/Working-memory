@@ -230,7 +230,7 @@ def bootstrap(data, measure_func, iters = 10000):
         measure_func : function
             The function for the statistic that will be calculated from
             bootstrap samples.  For instance, if you want to calculate the
-            distribution of the means of the sample, use np.mean() for
+            distribution of the means of the sample, use np.mean for
             measure_func.
         iters : int
             The number of bootstrapping samples you want to get from your
