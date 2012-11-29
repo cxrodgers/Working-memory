@@ -3,12 +3,13 @@
 import bcontrol
 import numpy as np
 from matplotlib.mlab import find
+from pandas import *
 
 class Rat(object):
     
     def __init__(self, name):
         
-        if not isinstance(name, str):
+        if not isinstance(name, basestring):
             raise TypeError, 'name should be a string'
         else:
             self.name = name
@@ -19,7 +20,7 @@ class Rat(object):
     
     def update(self, date, bdata):
         
-        if isinstance(date, str):
+        if isinstance(date, basestring):
             place = True
             if date in self.sessions['date']:
                 check = raw_input('Data exists for %s.  Replace data? [Yes/No] ' % date)
@@ -31,7 +32,7 @@ class Rat(object):
                 elif check == 'Yes':
                     pass
         else:
-            print 'The date must be a string'
+            print 'The date must be a string of form YYMMDD'
             return
         
         if place:
@@ -66,52 +67,76 @@ class Rat(object):
         bdata = self._data[date]
         consts = bdata['CONSTS']
         
-        records = [('outcome', 'i8'), ('response','i8'), ('stimulus', 'a20'), 
-        ('block', 'a8'), ('hits', 'u1'), ('errors', 'u1'), ('correct side', 'i8'), 
-        ('2PG port', 'i8'), ('PG port','i8'), ('FG port','i8'),
-        ('2PG outcome', 'i8'), ('PG outcome','i8'), ('FG outcome','i8'),
-        ('PG time','f8',2), ('RS time', 'f8'), ('FG time', 'f8'),
-        ('C time', 'f8', 2), ('2PG response'), ('PG response','i8'), ('response','i8'),
-        ('Trial length', 'f8'), ('block', 'i8')]
-        
+        # Set up the DataFrame
+        records = ['outcome', 'response', 'stimulus', 'block', 'hits', 'errors', 
+        'correct', '2PG port', 'PG port', 'FG port', '2PG outcome',
+        'PG outcome', 'FG outcome','2PG response', 'PG response',
+        'PG in', 'PG out', 'FG in','C in', 'C out', 'L reward',
+        'R reward', 'onset']
         n_trials = len(bdata['onsets'])
         
-        stimuli = bdata['SOUNDS_INFO']['sound_name']
-        stimuli = dict([ (ii, str(sound)) for ii,sound in enumerate(stimuli, 1)])
-        
-        # Unfortunately this is hard coded for the cued LLRR memory task
-        # But it's the only task with blocks I'm working with right now
-        blocks = dict({1:'cued', 2:'uncued'})
-        
-        trials = np.zeros(n_trials, dtype = records)
-        
+        #  Create the DataFrame
+        trials = DataFrame(index= range(n_trials), columns = records)
+       
         trials_info = bdata['TRIALS_INFO'][:n_trials]
         
         trials['outcome'] = trials_info['OUTCOME']
         trials['hits'] = trials_info['OUTCOME'] == consts['HIT']
         trials['errors'] = trials_info['OUTCOME'] == consts['ERROR']
-        trials['correct side'] = trials_info['CORRECT_SIDE']
+        trials['correct'] = trials_info['CORRECT_SIDE']
+        
+        stimuli = bdata['SOUNDS_INFO']['sound_name']
+        stimuli = dict([ (ii, str(sound)) for ii,sound in enumerate(stimuli, 1)])
         trials['stimulus'] = np.array([ stimuli[x] for x in trials_info['STIM_NUMBER']])
         
         # Will need to fix this...
         trials['block'] = np.array([tr[3:] for tr in trials['stimulus']])
         
         trials['response'][find(trials['hits'])] = \
-            trials['correct side'][trials['hits']]
-        incorrect_side = trials['correct side'][find(trials['errors'])]
+            trials['correct'][trials['hits']]
+        incorrect_side = trials['correct'][find(trials['errors'])]
         swap = {1:2, 2:1}
         swapped_sides = np.array([swap[t] for t in incorrect_side], dtype = 'uint8') 
         trials['response'][find(trials['errors'])] = swapped_sides
         
-        trials['FG port'] = trials['correct side']
-        trials['PG port'] = cat(np.zeros(1), trials['FG port'][:-1])
-        trials['2PG port'] = cat(np.zeros(2), trials['FG port'][:-2])
+        trials['FG port'] = trials['correct']
+        trials['PG port'] = trials['FG port'].shift(1)
+        trials['2PG port'] = trials['FG port'].shift(2)
         trials['FG outcome'] = trials['outcome']
-        trials['PG outcome'] = cat(np.zeros(1), trials['FG outcome'][:-1])
-        trials['2PG outcome'] = cat(np.zeros(2), trials['FG outcome'][:-2])
-        trials['PG response'] = cat(np.zeros(1), trials['response'][:-1])
-        trials['2PG response'] = cat(np.zeros(2), trials['response'][:-2])
+        trials['PG outcome'] = trials['FG outcome'].shift(1)
+        trials['2PG outcome'] = trials['FG outcome'].shift(2)
+        trials['PG response'] =trials['response'].shift(1)
+        trials['2PG response'] = trials['response'].shift(2)
         
+        # Now for timing information
+        
+        trials['onset'] = bdata['onsets']
+        
+        from itertools import izip
+        # Since I'll need the times from the current trial and the previous trial...
+        iterpeh = izip(bdata['peh'], bdata['peh'][1:])
+        trial = 1
+        # I'm making a decision to skip the first trial since it is worthless
+        for previous, current in iterpeh:
+            
+            trials['PG in'][trial] = np.nanmax(previous['states']['choosing_side'])
+            trials['PG out'][trial] = np.nanmin(current['states']['state_0'])
+            trials['C in'][trial]= np.nanmin(current['states']['hold_center'])
+            
+            trials['C out'][trial] = np.nanmin(current['states']['choosing_side'])
+            
+            trials['FG in'][trial] = np.nanmax(current['states']['choosing_side'])
+           
+            try:
+                trials['L reward'][trial] = np.nanmin(current['states']['left_reward'])
+            except ValueError:
+                pass
+            try:
+                trials['R reward'][trial] = np.nanmin(current['states']['right_reward'])
+            except ValueError:
+                pass
+        
+            trial += 1
         return trials
         
     def _to_process(self):
@@ -183,7 +208,31 @@ def get_data(filename):
     bcontrol.process_for_saving(bdata)
     
     return bdata
+
+def constants():
+    consts = {'CHOICE_TIME_UP': 3,
+                    'CONGRUENT': 1,
+                    'CURRENT_TRIAL': 6,
+                    'ERROR': 1,
+                    'FUTURE_TRIAL': 4,
+                    'GO': 1,
+                    'HIT': 2,
+                    'INCONGRUENT': -1,
+                    'LEFT': 1,
+                    'NOGO': 2,
+                    'NONCONGRUENT': -1,
+                    'NONRANDOM': 2,
+                    'RANDOM': 1,
+                    'RIGHT': 2,
+                    'SHORTPOKE': 5,
+                    'SHORT_CPOKE': 5,
+                    'TWOAC': 3,
+                    'UNKNOWN_OUTCOME': 4,
+                    'WRONG_PORT': 7}
     
+    return consts
+
+
 def streaks(rats):
     
     """ Okay, I want to find consecutive hits during uncued blocks 
@@ -210,9 +259,4 @@ def streaks(rats):
         d_list.append(diffs)
     
     return d_list
-		
-	
-	
-	
-	
-	
+    
