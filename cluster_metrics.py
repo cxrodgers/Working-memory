@@ -9,10 +9,7 @@ Last modified: 8/2/2012
 """
 
 import numpy as np
-from KKFileSchema import KKFileSchema
-import os
-import kkio
-from scipy import optimize as opt
+
 from scipy.special import erf
 from sklearn import mixture
 from itertools import combinations
@@ -36,6 +33,10 @@ def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
         out['times'] :  dictionary of clustered spike times
         out['waveforms'] : dictionary of clustered spike waveforms
     '''
+    
+    from KKFileSchema import KKFileSchema
+    import os
+    import kkio
     
     # Get the clustered data from Klustakwik files
     kfs = KKFileSchema.coerce(data_dir)
@@ -111,8 +112,6 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
     This algorithm follows from D.N. Hill, et al., J. Neuroscience, 2011
     '''
    
-    # Make the function we will use to solve for the false positive rate
-    func = lambda f: 2 * f * (1 - f) * N**2 * (t_ref - t_cen) / t_exp - ref
     
     # Make a dictionary to store the false positive rates
     f_p_1 = dict.fromkeys(clustered_times.keys())
@@ -126,19 +125,17 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
         ref = np.sum(isi <= t_ref)
         
         # The number of spikes in the cluster
-        N = len(times)
-        
-        # Then the false positive rate
-        try:
-            f_p_1[clst] = opt.brentq(func, 0, 0.5)
-        except:
-            f_p_1[clst] = np.nan
-        
+        N = float(len(times))
+
         # If there are no spikes in the refractory period, then set the
         # false positive rate to 0
         if ref == 0:
             f_p_1[clst] = 0
+    
+        cons = t_exp/(t_ref - t_cen)/2./N/N
         
+        f_p_1[clst] =(1 - np.sqrt(1-4*ref*cons))/2.
+    
     return f_p_1
 
 def threshold(clustered_waveforms, thresh):
@@ -212,7 +209,7 @@ def overlap(clustered_features, ignore = [0]):
     
     # This part is going to take out clusters we want to ignore
     keys = c_feat.keys()
-    [ keys.pop(keys.index(ig)) for ig in ignore ]
+    [ keys.pop(keys.index(ig)) for ig in ignore if ig in keys ]
     
     # We're going to need to fit models to all pairwise combinations
     # If the first cluster is a noise cluster, ignore it
@@ -258,7 +255,7 @@ def overlap(clustered_features, ignore = [0]):
         f_n_i_k = 1/N_i*np.min(np.sum(gmm.predict_proba(c_feat[k]), axis=0))
         
         # Now store these values
-        
+        # Probably a better way to do this but I haven't put brain power to it
         if type(f_p[k]) != list:
             f_p[k] = [f_p_k_i]
         else:
@@ -355,5 +352,32 @@ def metrics(data, thresh, t_ref, t_cen, t_exp, ignore = [0]):
         
     return f_p, f_n
     
+def batch_metrics(unit_list, threshold, t_ref, t_cen):
+    ''' This here function runs metrics on a batch of data.  Pass in units from the catalog.
+    '''
     
+    from scipy import unique
+    
+    samp_rate = 30000.
+    n_samples = 30
+    n_chans = 4
+    
+    # Find common Sessions
+    sessions = unique([unit.session for unit in unit_list])
+    
+    for session in sessions:
+        
+        units = session.units
+        tetrodes = unique([unit.tetrode for unit in units])
+        
+        for tetrode in tetrodes:
+            data = load_spikes(session.path, tetrode,  samp_rate, n_samples, n_chans)
+            f_p, f_n = metrics(data, threshold, t_ref, t_cen, session.duration)
+            # Doing this because sometimes there is no cluster 0 sometimes
+            f_p.setdefault(0)
+            f_n.setdefault(0)
+            units = [ unit for unit in session.units if unit.tetrode == tetrode] 
+            for unit in units:
+                unit.falsePositive = f_p[unit.cluster]
+                unit.falseNegative = f_n[unit.cluster]
     
