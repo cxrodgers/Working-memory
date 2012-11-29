@@ -3,6 +3,14 @@
 # Ref: http://klusters.sourceforge.net/UserManual/data-files.html
 # Begin format specification (lightly modified from above):
 """
+Scans through the date directories under a rat directory and converts
+.cls files from ePhys sorter to KlustaKwik files.  When you run the script,
+input the rat name as the argument.  Like so:
+
+python klustakwikIO.py 'CWM019'
+
+
+==============================================
 The Feature File
 
 Generic file name: base.fet.n
@@ -29,11 +37,13 @@ of the recording session.
 
 Notice that the last line must end with a newline or carriage return. 
 """
+
 import cPickle
 import numpy as np
 import os.path
 from os import listdir
 from matplotlib.mlab import find
+import sys
 
 class UniqueError(Exception):
     pass
@@ -47,7 +57,10 @@ def unique_or_error(a):
     else:
         return u[0]
 
-ratname = 'ALY1A'
+
+ratname = sys.argv[1]
+dorun = 1
+
 topdir = '/home/mat/Dropbox/Working-memory'
 dirlist = listdir(os.path.join(topdir,ratname))
 dir_test = [ os.path.isdir(os.path.join(topdir, ratname, fil)) for fil in dirlist ]
@@ -65,7 +78,16 @@ for date in dates:
     # Find the tetrodes we're dealing with
     files  = listdir(data_dir)
     
-    # Sorry this is gross, maybe there's a better way to get out only the .cls files?
+    # Check if we already converted to KK files in this directory
+    fetfiles = [files[ind] for ind in find([ '.fet' in f for f in files ])]
+    if dorun:
+        pass
+    elif fetfiles:
+        continue
+    else:
+        pass
+    
+    # Grab the .cls files
     clsfiles = [files[ind] for ind in find([ '.cls' in f for f in files ])]
     
     # If clsfiles is not empty, keep going
@@ -85,9 +107,10 @@ for date in dates:
             data = cPickle.load(fi)
         # Sanitize data...  if a cluster is empty, it'll show up as an int == 0
         int_test = [ type(datum['pca'])!=type(1) for datum in data ]
-        data = [ data[ind] for ind in find(int_test) ]
+        valid_clusters = find(int_test)
+        data = [ data[ind] for ind in valid_clusters ]
         n_features = unique_or_error([d['pca'].shape[1] for d in data])
-        n_clusters = len(data)
+        n_clusters = len(valid_clusters)
 
 
         # filenames
@@ -111,7 +134,7 @@ for date in dates:
         with file(clufilename, 'w') as clufile:
             clufile.write('%d\n' % n_clusters)
             for n, d in enumerate(data):
-                np.savetxt(clufile, n * 
+                np.savetxt(clufile, valid_clusters[n] * 
                     np.ones(len(d['peaks']), dtype=np.int), fmt='%d')
 
         # write spkfile
