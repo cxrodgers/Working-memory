@@ -43,6 +43,8 @@ class Session(Base):
     date = Column(String)
     notes = Column(String)
     duration = Column(Float)
+    depth = Column(Float)
+    path = Column(String)
     
     project_id = Column(Integer, ForeignKey("projects.id"))
     
@@ -67,6 +69,9 @@ class Unit(Base):
     notes : any notes about the unit
     depth : depth at which the unit was recorded
     
+    Just a warning, documenation of the attributes might be wrong,
+    but the code should always work.
+    
     '''
     __tablename__ = 'units'
     
@@ -74,11 +79,10 @@ class Unit(Base):
 
     tetrode = Column(Integer)
     cluster = Column(Integer)
-    path = Column(String)
     falsePositive = Column(Float)
     falseNegative = Column(Float)
     notes = Column(String)
-    depth = Column(Float)
+    rate = Column(Float)
     
     session_id = Column(Integer, ForeignKey("sessions.id"))
     
@@ -121,21 +125,17 @@ class Catalog(object):
     def start_project(self, project, researcher = None):
         ''' Start a project and add it to the database '''
         
-        conn = self.connection
+        conn = self.open()
         conn.add(Project(project, researcher))
         conn.commit()
     
-    def get_project(self, project, connection=None):
+    def get_project(self, project):
         ''' Returns a Project
         
         Parameters
         ----------
         project : string
             name of the project you want
-        connection : session SQLAlchemy object
-            pass in a session already opened to get the project from there, or
-            leave it empty so that it will open a new session and return the project
-            You can get this from self.open()
         
         Returns
         -------
@@ -165,7 +165,6 @@ class Catalog(object):
             raise NoResultFound("Session doesn't exist")
         
         return session
-        
     
     def add_unit(self, project, rat, date, tetrode, cluster, **kwargs):
         ''' Add a unit to a project '''
@@ -191,6 +190,10 @@ class Catalog(object):
         
         if kwargs:
             self.update_unit(unit, **kwargs)
+            
+    def add_batch(self, unit_list):
+        self.connection.add_all(unit_list)
+        self.connection.commit()
     
     def get_unit(self, *args, **kwargs):
         '''
@@ -236,9 +239,8 @@ class Catalog(object):
         elif (len(args)==4) & (arg_types != valid_types):
             raise ValueError('Input arguments do not conform to valid types')
         else:            
-            raise ValueError('len(args) == 1 or 4')
+            raise ValueError('len(args) = %s, must be 1 or 4' % len(args))
             
-        
         return unit
 
     def update_unit(self, *args, **kwargs):
@@ -282,26 +284,34 @@ class Catalog(object):
         
         '''
         
-        
-        # Doing it this way so that if the attributes of the
-        # Unit class are changed, the valid keys here will change automatically
-        valid_keys = [key for key in dir(Unit) if key[0]!='_']
+        # Doing it this way so that if the attributes of the Unit or Session
+        # classes are changed, the valid keys here will change automatically
+        valid_unit_keys = [key for key in dir(Unit) if key[0]!='_']
         excise = ['metadata', 'id', 'session', 'session_id']  # don't want these to be accessed
         for exc in excise:
-            valid_keys.remove(exc)
+            valid_unit_keys.remove(exc)
+        
+        valid_session_keys = [key for key in dir(Session) if key[0]!='_']
+        excise = ['metadata', 'id', 'units', 'project_id']  # don't want these to be accessed
+        for exc in excise:
+            valid_session_keys.remove(exc)
         
         if type(args[0]) == Unit:
             unit = args[0]
         else:
             unit = self.get_unit(*args)
         
+        session = unit.session
+        
         if kwargs:
             for key in kwargs.iterkeys():
-                if key in valid_keys:
-                    pass
+                if key in valid_unit_keys:
+                    setattr(unit, key, kwargs[key])
+                elif key in valid_session_keys:
+                    setattr(session, key, kwargs[key])
                 else:
                     raise NameError('%s not a valid keyword' % key)
         
-        for key in kwargs.iterkeys():
-            setattr(unit, key, kwargs[key])
-        
+    def query(self,*args, **kwargs):
+        ''' Just to make things a little easier'''
+        return self.connection.query(*args,**kwargs)
