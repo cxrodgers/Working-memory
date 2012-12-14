@@ -242,24 +242,18 @@ def bootstrap(data, measure_func, iters = 10000):
             The output of measure_func for each of the bootstrap samples.
         
     '''
-
-    measure = measure_func
     
-    out = [ measure(data[samp]) for samp in BootSample(0,len(data), iters) ]
+    out = map(measure_func, BootSample(data, iters))
     
     return np.array(out)
     
 class BootSample(object):
-    ''' A generator used for bootstrapping.  It (pseudo)randomly generates
-        an array of integers that can be used to resample data.
+    ''' A generator used for bootstrapping.  Samples with replacement from
+        a data array.
         
         Parameters
         ----------
-        min : int
-            The minimum integer to return in the output array.
-        max : int
-            The maximum integer to return in the output array.  Also,
-            the length of the output array.
+       
         iters : int
             The number of iterations before the generator runs out.
         
@@ -271,16 +265,46 @@ class BootSample(object):
     
     '''
     
-    def __init__(self, min, max, iters):
-        self._min = min
-        self._max = max
+    def __init__(self, data, iters):
+        self._data = data
         self._iters = iters
         
     def __iter__(self):
-        return self.next()
-    
-    def next(self):
         for ii in np.arange(self._iters):
-            samp = randint(self._min, self._max, self._max)
+            sample = randint(0,len(self._data),len(self._data))
+            if hasattr(self._data, 'ix'):
+                index = self._data.index
+                samp = self._data.ix[index[sample]]
+            else:
+                samp = self._data[sample]
             yield samp
     
+def calculate_rates(all_units):
+    
+    import os
+    import cPickle as pkl
+    
+    sessions = np.unique([ unit.session for unit in all_units ])
+
+    for session in sessions:
+
+        units = session.units
+        tetrodes = np.unique([ unit.tetrode for unit in units ])
+        path = os.path.expanduser(session.path)
+        
+        for tetrode in tetrodes:
+            # Load the data
+            filename = '%s_%s.cls.%s' % (session.rat, session.date, tetrode)
+            path_filename = os.path.join(path, filename)
+            with open(path_filename,'r') as cls:
+                clusters = pkl.load(cls)
+            
+            units = [ unit for unit in session.units if unit.tetrode == tetrode ]
+            
+            for unit in units:
+                unit_data = clusters[unit.cluster]
+                if type(unit_data['peaks']) == type(np.array(1)):
+                    spike_count = len(unit_data['peaks'])
+                else:
+                    spike_count = 0
+                unit.rate = spike_count / session.duration
