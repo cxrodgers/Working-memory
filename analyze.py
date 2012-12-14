@@ -20,7 +20,7 @@ def ratehist(unit, trialData, bin_width=0.200, range = (-20,2)):
         rateFrame[ii] = rate
     return rateFrame
 
-def raster(unit, trialData, sort_by= 'PG in', range = (-20,3)):
+def raster(unit, trialData, sort_by= 'PG in', range = None):
     
     uid = unit.id
     data = trialData
@@ -34,7 +34,10 @@ def raster(unit, trialData, sort_by= 'PG in', range = (-20,3)):
         plt.scatter(srtdata['FG in'][ind], trial, color = 'blue', marker = 'o')
     
     plt.plot([0,0], [0,len(data)], color = 'grey')
-    plt.xlim(range)
+    if range == None:
+        plt.xlim(srtdata['PG in'].mean()-2, srtdata['FG in'].mean()+2)
+    else:
+        plt.xlim(range)
     plt.ylim(0,len(data))
     plt.show() 
 
@@ -78,12 +81,12 @@ def basic_figs(unit, trialData, range=(-10,3)):
     rates = [cued.mean(), uncued.mean()]
     base_plot(times.columns.values, rates, label = ['cued', 'uncued'])
     
-
-def trajectory(unit, trialData, prange= (-10,3)):
+def trajectory(unit, trialData, range= (-10,3)):
     
     data = trialData
     
-    def base_plot(unit, data, prange):
+    # Define the plot
+    def base_plot(unit, data, range):
         
         ylims=[0]*4
         titles = ['right->left', 'left->left', 'left->right', 'right->right']
@@ -101,10 +104,10 @@ def trajectory(unit, trialData, prange= (-10,3)):
         plt.figure()
         for ii, num in enumerate(subplots):
             plt.subplot(num)
-            rates = ratehist(unit, traj_data[ii], range = prange)
+            rates = ratehist(unit, traj_data[ii], range = range)
             plt.plot(rates.index, rates.T.mean())
             plt.title(titles[ii])
-            plt.xlim(prange)
+            plt.xlim(range)
             ylims[ii] = plt.ylim()[1]
         
         # Scaling all subplots to the same max y
@@ -118,16 +121,17 @@ def trajectory(unit, trialData, prange= (-10,3)):
         plt.figure()
         for ii, num in enumerate(subplots):
             plt.subplot(num)
-            raster(unit, traj_data[ii], range = prange)
+            raster(unit, traj_data[ii], range = range)
             plt.title(titles[ii])
             
     cued = data[data['hits'] & (data['block']=='cued')]
     uncued = data[data['hits'] & (data['block']=='uncued')]
     
-    base_plot(unit, cued, prange)
-    base_plot(unit, uncued, prange)
+    # Pass the data to the plot
+    base_plot(unit, cued, range)
+    base_plot(unit, uncued, range)
 
-def epoch(unit, trialData, low, high):
+def interval(unit, trialData, low, high):
     
     lows = ['PG in','PG out','C in','C out','L reward','R reward','onset']
     highs = ['PG out','C in','C out','L reward','R reward','onset','FG in']
@@ -154,7 +158,7 @@ def epoch(unit, trialData, low, high):
     return times.T
     
 
-def epoch_scatter(units, locked, compare = 'PG', label = 'Avg rate'):
+def interval_scatter(units, locked, compare = 'PG', label = 'Avg rate'):
     ''' compare: valid options are 'PG', 'FG', 'block', 'repeats'
     '''
     
@@ -190,7 +194,6 @@ def epoch_scatter(units, locked, compare = 'PG', label = 'Avg rate'):
             print 'Not implemented yet'
             return None
     
-
         x_epochs = [epoch(unit, xdata, ev[0], ev[1]) for ev in events]
         y_epochs = [epoch(unit, ydata, ev[0], ev[1]) for ev in events]
         
@@ -198,8 +201,6 @@ def epoch_scatter(units, locked, compare = 'PG', label = 'Avg rate'):
         y_boot = []
         
         for ep in x_epochs:
-            
-            
             
             rates = np.array([ len(spks)/ep[1][ii]  for data in ep ])
             x_mean.append(_bootstrap(rates, measure_func))
@@ -238,57 +239,146 @@ def epoch_scatter(units, locked, compare = 'PG', label = 'Avg rate'):
         #plt.ylim(0,plt.ylim()[1])
         plt.show()
 
-def cut(unit, data, sort_by='PG in'):
+def slice(unit, trialData, sort_by = None, show = False):
+    
+    data = trialData
+    
+    if sort_by in trialData.columns:
+        data = trialData.sort(columns=sort_by)
     
     rates = DataFrame(index=data.index, columns = range(6))
-
+    
     for ind, row in data.iterrows():
         pg = (row['PG in'], row['PG out'])
         fg = (row['C out'], row['FG in'])
         cent = (row['C in'], row['C out'])
         delay = (row['PG out'], row['C in'])
     
-        counts = [np.histogram(row[unit.id], bins = 1, range=period)[0] 
-            for period in [pg, fg,cent]]
+        counts = [ np.histogram(row[unit.id], bins = 1, range=pg)[0] ]
         
         counts.append(np.histogram(row[unit.id], bins=3, range=delay)[0])
+        counts.extend([np.histogram(row[unit.id], bins = 1, range=period)[0] 
+                        for period in [cent, fg]])
+        
         counts = np.concatenate(counts)
-        diffs = [pg[1]-pg[0], fg[1]-fg[0], cent[1]-cent[0], 
-            (delay[1]-delay[0])/3.0, (delay[1]-delay[0])/3.0,
-            (delay[1]-delay[0])/3.0]
+        diffs = [pg[1]-pg[0], (delay[1]-delay[0])/3.0, (delay[1]-delay[0])/3.0,
+                (delay[1]-delay[0])/3.0, cent[1]-cent[0], fg[1]-fg[0], ]
+        
+        
         rates.ix[ind] = counts/diffs
     
-    plt.imshow(rates.astype(float), aspect='auto', interpolation = 'nearest',
-        extent=[0,5,0,len(rates)])
+    if show:
+        plt.imshow(rates.astype(float), aspect='auto', interpolation = 'nearest',
+            extent=[0,5,0,len(rates)])
     
     return rates
 
-def components(rates):
-    prep = rates - rates.mean()
-    pca = PCA(n_components = 2)
-    out = pca.fit(prep).transform(prep)
-    plt.figure()
-    plt.scatter(out[:,0], out[:,1])
+def ssi(rates_stims):
+    ''' Calculates the Stimulus Selectivity Index.
     
-def fano(unit, data):
+    Parameters
+    ----------
+    rates_stims : pandas DataFrame
+        A DataFrame with two columns, one column should be 'rates',
+        the other column is 'stimulus', rows are trials.
     
-    spkcount = DataFrame(index=data.index, columns = range(6))
+    '''
     
-    for ind, row in data.iterrows():
-        pg = (row['PG in'], row['PG out'])
-        fg = (row['C out'], row['FG in'])
-        cent = (row['C in'], row['C out'])
-        delay = (row['PG out'], row['C in'])
+    data = rates_stims
+    stims = dict.fromkeys(np.unique(data['stimulus']))
+    for stim in stims.iterkeys():
+        just_stim = data[data['stimulus']==stim]
+        rate = just_stim['rates'].mean()
+        stims[stim] = rate
     
-        counts = [np.histogram(row[unit.id], bins = 1, range=period)[0] 
-            for period in [pg, fg,cent]]
+    avg_rates = stims.values()
+    if (avg_rates[0]+avg_rates[1]):
+        out = (avg_rates[0]-avg_rates[1])/(avg_rates[0]+avg_rates[1])
+    else:
+        out = 0
         
-        counts.append(np.histogram(row[unit.id], bins=3, range=delay)[0])
-        counts = np.concatenate(counts)
+    
+    return out
+
+def ssi_scatter(timelock, iter = 100):
+    
+    from myutils import bootstrap
+    from matplotlib.mlab import prctile, find
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    storeSSI = {'PG':[],'FG':[]}
+    mem = {'PG response':'PG', 'response':'FG'}
+    
+    units = timelock.units
+    
+    # For each unit, compute the SSI for PG and FG
+    for unit in units:
         
-        spkcount.ix[ind] = counts
-        fanofactor = spkcount.var()/spkcount.mean()
-    return fanofactor.values
+        data = timelock.get(unit)
         
+        # For now, I only want to look at hit-hit trials
+        select = (data['PG outcome']==consts['HIT']) & \
+                (data['outcome']==consts['HIT'])
+        trials = data[select]
         
-        
+        inter = interval(unit,trials,'PG out','onset')
+        counts = inter[unit.id].map(len)
+        rates = counts/(inter['onset']-inter['PG out'])
+        for goal in mem.keys():
+            input = DataFrame({'rates':rates, 'stimulus':trials[goal]})
+            
+            storeSSI[mem[goal]].append(bootstrap(input,ssi,iters=iter))
+    
+    meanSSI = dict.fromkeys(storeSSI.keys())
+    intervSSI = dict.fromkeys(storeSSI.keys())
+    
+    for key, ssis in storeSSI.iteritems():
+        # Calculate the means of the bootstrapped SSIs
+        meanSSI[key] = [ np.mean(unitSSI) for unitSSI in ssis ]
+        # Calculate the 95% confidence intervals of the boostrapped SSIs
+        intervSSI[key] = [ prctile(unitSSI,p=(2.5,97.5)) for unitSSI in ssis ]
+    
+    # Now let's check for significance
+    sig = dict.fromkeys(meanSSI.keys())
+    def check_between(check, between):
+        is_it = (between[0] <= check) & (between[1] >= check)
+        return is_it
+    for key, iSSIs in intervSSI.iteritems():
+        sig[key] = np.array([ not check_between(0,issi) for issi in iSSIs ])
+    
+    not_sig = [ not (pg | fg) for pg,fg in zip(sig['PG'],sig['FG']) ]
+    not_sig = np.array(not_sig)
+    
+    sig_colors = {'PG':'r','FG':'b'}
+    xpnts = np.array(meanSSI['PG'])
+    ypnts = np.array(meanSSI['FG'])
+    xbars = np.abs(np.array(intervSSI['PG']).T - xpnts)
+    ybars = np.abs(np.array(intervSSI['FG']).T - ypnts)
+    
+    # First, plot the not significant units
+    ax.errorbar(xpnts[not_sig],ypnts[not_sig],
+                yerr=ybars[:,not_sig],xerr=xbars[:,not_sig],
+                fmt='o', color = 'grey')
+    
+    # Then plot things that are significant for PG and FG
+    for key in sig.iterkeys():
+        if sig[key].any():
+            ax.errorbar(xpnts[sig[key]],ypnts[sig[key]],
+                yerr=ybars[:,sig[key]],xerr=xbars[:,sig[key]],
+                fmt='o', color = sig_colors[key])
+    
+    xs = ax.get_xlim()
+    ys = ax.get_ylim()
+    ax.plot(xs,[0,0],'-k')
+    ax.plot([0,0],ys,'-k')
+    ax.plot([-10,10],[-10,10],'--',color='grey')
+    ax.set_xlabel('PG SSI')
+    ax.set_ylabel('FG SSI')
+    ax.set_xlim(xs)
+    ax.set_ylim(ys)
+    ax.set_aspect('equal')
+    
+    #fig.show()
+    
+    return sig, not_sig
