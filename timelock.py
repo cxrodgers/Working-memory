@@ -1,5 +1,3 @@
-''' Rewriting timelock module probably.'''
-
 import numpy as np
 from scipy import unique
 from matplotlib.mlab import find
@@ -32,16 +30,18 @@ class Timelock(object):
         
         self.units = unit_list
         self._setup()
+        
     
     def _setup(self):
         
         sessions = unique([unit.session for unit in self.units])
         self._sessions = sessions
-        self.rawdata = dict.fromkeys(sessions)
+        self._rawdata = dict.fromkeys(sessions)
         
         for session in sessions:
             
             datadir = expanduser(session.path)
+            # We might might be looking at all the units in this session
             session_units = [ unit for unit in self.units if unit in session.units ]
             tetrodes = unique([unit.tetrode for unit in session_units])
             
@@ -53,12 +53,13 @@ class Timelock(object):
             rat.update(session.date, bdata)
             trial_data = rat.sessions['trials'][0]
             
-            samp_rate = 30000.0
-            n_onsets = data['ons']/samp_rate
-            self._nons = n_onsets
-            
             # Keep only the behavior trials we have neural data for
-            trial_data = trial_data.T[data['syn'].map_n_to_b].T
+            sync = data['syn'].map_n_to_b_masked
+            trial_data = trial_data.ix[sync.data[~sync.mask]]
+            
+            # Get the onsets from the neural data
+            samp_rate = 30000.0
+            n_onsets = data['ons'][~sync.mask]/samp_rate
             trial_data['n_onset'] = n_onsets
             
             for tetrode in tetrodes:
@@ -70,7 +71,7 @@ class Timelock(object):
                 
                 # For each trial, we want to grab all the spikes between PG and FG,
                 # plus 30 seconds on either side
-                for ii, (unit, cluster) in enumerate(packed):
+                for unit, cluster in packed:
                     times = _get_times(cluster['peaks'], trial_data)
                     trial_data[unit.id] = times
                 
@@ -78,8 +79,8 @@ class Timelock(object):
             delay_limit = 20
             delay = trial_data['C in'] - trial_data['PG in']
             trial_data = trial_data[delay < delay_limit]
-            
-        self.rawdata[session] = trial_data
+        
+            self._rawdata[session] = trial_data
             
     def lock(self,event):
         '''  Sets t = 0 s for spike timestamps to the time of the event in that
@@ -99,8 +100,7 @@ class Timelock(object):
         
         '''
         
-        
-        self.locked = dict.fromkeys(self._sessions)
+        self._locked = dict.fromkeys(self._sessions)
         for session in self._sessions:
             
             self.event = event
@@ -111,7 +111,7 @@ class Timelock(object):
             else:
                 raise ValueError('%s is not a valid event' % event)
             
-            trial_data = self.rawdata[session].copy()
+            trial_data = self._rawdata[session].copy()
             
             # I want to subtract time zero from all the time columns
             spikecols = trial_data.columns[[type(col)==type(1) for col in trial_data.columns ]]
@@ -123,9 +123,14 @@ class Timelock(object):
                 trial_data[column] = trial_data[column] - tzero
             trial_data[event] = 0
             
-            self.locked[session] = trial_data
+            self._locked[session] = trial_data
     
         return self
+    
+    def get(self, unit):
+        ''' Returns data for the given unit. '''
+        
+        return self._locked[unit.session]
     
     def __repr__(self):
         
@@ -173,21 +178,22 @@ def _load_data(datadir, tetrodes):
 def _get_times(timestamps, trial_data):
     
     out_times = []
-    
-    for ii, trial in trial_data.iterrows():
+    if type(timestamps) != type(1):
+        for ii, trial in trial_data.iterrows():
+            
+            low = trial['n_onset'] - (trial['onset'] - trial['PG in'])
+            high = trial['n_onset'] + (trial['onset'] - trial['FG in'])
+            
+            in_window = find((timestamps > (low-30)) & (timestamps < (high+30)))
+            # Now we grab the timestamps in out window and sort
+            stamps = sorted(timestamps[in_window])
+            
+            # And align the neural time stamps with the behavior time stamps
+            stamps = stamps + np.abs(trial['n_onset']-trial['onset'])
+            out_times.append(stamps)
         
-        
-        low = trial['n_onset'] - (trial['onset'] - trial['PG in'])
-        high = trial['n_onset'] + (trial['onset'] - trial['FG in'])
-        
-        in_window = find((timestamps > (low-30)) & (timestamps < (high+30)))
-        # Now we sort
-        stamps = sorted(timestamps[in_window])
-        
-        # And align the neural time stamps with the behavior time stamps
-        stamps = stamps + np.abs(trial['n_onset']-trial['onset'])
-        out_times.append(stamps)
-    
-    return out_times
+        return out_times
+    else:
+        return None
     
     
