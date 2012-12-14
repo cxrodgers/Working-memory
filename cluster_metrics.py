@@ -374,8 +374,8 @@ def batch_metrics(unit_list, threshold, t_ref, t_cen):
             data = load_spikes(session.path, tetrode,  samp_rate, n_samples, n_chans)
             f_p, f_n = metrics(data, threshold, t_ref, t_cen, session.duration)
             # Doing this because sometimes there is no cluster 0 sometimes
-            f_p.setdefault(0)
-            f_n.setdefault(0)
+            f_p.setdefault(1)
+            f_n.setdefault(1)
             units = [ unit for unit in session.units if unit.tetrode == tetrode] 
             for unit in units:
                 unit.falsePositive = f_p[unit.cluster]
