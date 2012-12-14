@@ -3,7 +3,7 @@
 import bcontrol
 import numpy as np
 from matplotlib.mlab import find
-from pandas import *
+from pandas import Series, DataFrame, Panel
 
 class Rat(object):
     
@@ -120,13 +120,22 @@ class Rat(object):
         for previous, current in iterpeh:
             
             trials['PG in'][trial] = np.nanmax(previous['states']['choosing_side'])
-            trials['PG out'][trial] = np.nanmin(current['states']['state_0'])
+            
+            if trials['PG response'][trial] == consts['LEFT']:
+                trials['PG out'][trial] = np.nanmax(previous['pokes']['L'])
+            elif trials['PG response'][trial] == consts['RIGHT']:
+                trials['PG out'][trial] = np.nanmax(previous['pokes']['R'])
+            else:
+                trials['PG out'][trial] = np.nanmax(previous['states']['choice_time_up_istate'])
+            
             trials['C in'][trial]= np.nanmin(current['states']['hold_center'])
             
             trials['C out'][trial] = np.nanmin(current['states']['choosing_side'])
             
             trials['FG in'][trial] = np.nanmax(current['states']['choosing_side'])
            
+            
+                
             try:
                 trials['L reward'][trial] = np.nanmin(current['states']['left_reward'])
             except ValueError:
