@@ -12,12 +12,8 @@ import numpy as np
 
 from scipy.special import erf
 
-# Scikits.learn changes the import command
-try:
-    from sklearn import mixture
-except ImportError:
-    # This is probably too old of a version to work anyway
-    from scikits.learn import mixture
+from sklearn import mixture
+import sklearn
 
 from itertools import combinations
 
@@ -206,7 +202,127 @@ def threshold(clustered_waveforms, thresh, warn_on_thresh_violation=True, peak_s
         f_n[clst] = (1-cdf) 
     
     return f_n
+
+def fraction_during_refractory(clustered_times, t_ref):
+    """Simple estimate of false positives: # spikes in refractory / total.
     
+    If the neuron were Poisson, we'd expect to see FR * t_ref spikes
+    during each window of length t_ref throughout the experiment, so a total
+    of FR * t_ref * t_exp / t_ref spikes, which simplifies to just the total
+    number of spikes.
+    
+    So, this can be interpreted as a lowball estimate of false positives
+    (only the ones that happened to occur during refractory period), or as
+    the height of the autocorrelation compared to its mean.
+    """
+    f_p = {}
+    for uid, times in clustered_times.items():
+        # Count violations
+        isi = np.diff(times)
+        n_violations = sum(isi < t_ref)
+        
+        # Divide by total number of spikes
+        f_p[uid] = n_violations / float(len(times))
+    return f_p
+
+
+def overlap_with_svm(clustered_features, ignore=None):
+    """Evaluate cluster overlap by the prediction quality of an SVM.
+    
+    Fit an SVM to the data (with labels). Take the predictions of the SVM
+    on the same dataset. We will use the false positives or false negatives
+    of these predictions as estimates of the false positives or false negatives
+    in the original data. 
+    
+    The FPR for cluster I is the number of times the SVM incorrectly 
+    predicted that a spike from cluster !I was actually in cluster I, 
+    divided  by the total number of spikes it predicted to be in I. 
+    This keeps the rate between 0 and 1.
+    It can be NaN if the algorithm never predicted anything to be in I.
+    
+    The FNR for cluster I is the number of times the SVM incorrectly 
+    predicted that a spike from cluster I was actually in cluster !I, 
+    divided by the number of spikes actually in cluster I.
+    This keeps the rate between 0 and 1.
+    It should never be NaN, unless you provided empty clusters.
+    
+    Caveats:
+        1)  Will be an underestimate of the true error rates because we test
+            on the training set. Should really cross-validate.
+
+        2)  Could be an overestimate of the true error rate because the SVM
+            might be doing a worse job than the original clustering algorithm.
+            Just because the SVM makes an error doesn't mean that the spike
+            was actually incorrectly labeled
+    
+    Parameters:
+    clustered_features : dict
+        {cluster_id : feature array of shape (N_spikes, N_features)}
+    ignore : list of cluster_id to ignore
+    
+    Returns: f_p, f_n, confusion
+    f_p, f_n : dicts
+        {cluster_id : FPR or FNR for that cluster}
+        Will be None for units that in `ignore`
+    confusion : 2d array
+        Has shape (len(clustered_features), len(clustered_features))
+        The entry at row i and col j is the number of times a unit that you
+        clustered as i was clustered as j by the SVM.
+        The rows and columns are sorted by the keys in clustered_features.
+    """
+    # Figure out which to ignore
+    if ignore is None:
+        ignore = [0]
+    unit_ids = sorted(clustered_features.keys())
+    unit_ids = [uid for uid in unit_ids if uid not in ignore]
+    
+    # Concatenate the data and original labels into the shape expected
+    # by the classifier
+    data_vecs = np.concatenate([clustered_features[k] for k in unit_ids])
+    labels = np.concatenate([
+        k * np.ones(len(clustered_features[k]), dtype=np.int)
+        for k in unit_ids])
+
+    # Fit the data and get predictions
+    lsvc = sklearn.svm.LinearSVC()
+    lsvc.fit(data_vecs, labels)
+    preds = lsvc.predict(data_vecs)
+
+    # Create a confusion matrix .. true unit on rows, predictions on cols
+    confusion = np.empty((len(unit_ids), len(unit_ids)), dtype=np.int)
+    for nr, true_unit in enumerate(unit_ids):
+        for nc, confused_unit in enumerate(unit_ids):
+            confusion[nr, nc] = sum(preds[labels == true_unit] == confused_unit)
+
+    # false positive: probability of predicting I when actually !I
+    # so, we sum the rows together, and subtract off the # of hits
+    false_positives = confusion.sum(axis=0) - np.diag(confusion)
+
+    # The FPR is the number of false positives in the SVC predictions, 
+    # divided by number of times that prediction was made
+    # So, at worst, every single prediction of I is incorrect: FPR = 1
+    false_positive_rate = false_positives / confusion.sum(axis=0).astype(np.float)
+
+    # false negative: probability of labeling !I when actually I
+    # so, we sum the columns together, and subtract off the # of hits
+    false_negatives = confusion.sum(axis=1) - np.diag(confusion)
+
+    # The FNR is the number of false negatives in the SVC predictions, 
+    # divided by number of data points originally labelled that
+    # So, at worst, I was never predicted: FNR = 1
+    false_negative_rate = false_negatives / confusion.sum(axis=1).astype(np.float)    
+    
+    # Convert to dict
+    f_p = dict([(uid, fpr) for uid, fpr in zip(unit_ids, false_positive_rate)])
+    f_n = dict([(uid, fnr) for uid, fnr in zip(unit_ids, false_negative_rate)])
+    for uid in clustered_features.keys():
+        if uid not in f_p:
+            f_p[uid] = None
+        if uid not in f_n:
+            f_n[uid] = None
+    
+    return f_p, f_n, confusion
+
 def overlap(clustered_features, ignore = [0]):
     ''' Okay, so we are going to calculate the false positives and negatives
     due to overlap between clusters.
@@ -247,7 +363,8 @@ def overlap(clustered_features, ignore = [0]):
         gmm = mixture.GMM(n_components = 2, covariance_type = 'full', 
             init_params='')
         
-        # The data we are going to fit the model to
+        # The data we are going to fit the model to, which is unlabelled
+        # concatenation of the two clusters.
         data_vecs = np.concatenate((c_feat[clst_1], c_feat[clst_2]))
         
         # Fit the GMM to the data
@@ -264,14 +381,31 @@ def overlap(clustered_features, ignore = [0]):
         N_k = np.float(len(c_feat[k]))
         N_i = np.float(len(c_feat[i]))
         
-        # This calculates the average probability (over k) that a spike in 
-        # cluster k belongs to cluster i - false positives
-        f_p_k_i = 1/N_k*np.min(np.sum(gmm.predict_proba(c_feat[k]), axis=0))
+        #~ # This is the probability of the spikes in K belonging to each of
+        #~ # the 2 fit clusters.
+        #~ gppk = gmm.predict_proba(c_feat[k])
         
+        #~ # Assign the "error" as the less probable of the two
+        #~ erridx_k = gppk.mean(axis=0)).argmin()
+        #~ perr_k = gppk[erridx_k]
+        
+        #~ # This is the probability of the spikes in I belonging to each of
+        #~ # the 2 fit clusters.
+        #~ gppi = gmm.predict_proba(c_feat[i])
+        
+        #~ # Assign the "error" as the less probable of the two
+        #~ erridx_i = gppk.mean(axis=0)).argmin()
+        #~ perr_i = gppk[erridx_k]
+
+        # This calculates the average probability (over k) that a spike in 
+        # cluster k belongs to cluster i - false positives in k
+        f_p_k_i = 1/N_k*np.min(np.sum(gmm.predict_proba(c_feat[k]), axis=0))
+        #~ f_p_k_i = perr_k.sum() / N_k
+
         # This calculates the average probability (over k)  that a spike in 
         # cluster i belongs to cluster k - false negatives
         f_n_k_i = 1/N_k*np.min(np.sum(gmm.predict_proba(c_feat[i]), axis=0))
-        
+
         # This calculates the average probability (over i) that a spike in 
         # cluster i belongs to cluster k - false positives
         f_p_i_k = 1/N_i*np.min(np.sum(gmm.predict_proba(c_feat[i]), axis=0))
@@ -304,8 +438,12 @@ def overlap(clustered_features, ignore = [0]):
     
     # Sum over all values from pairs of clusters
     for clst in f_p.iterkeys():
+        # False positives is the sum of the fraction of spikes from this
+        # cluster that probably belong to all other clusters
         f_p[clst] = np.sum(f_p[clst])
-        f_n[clst] = np.sum(f_n[clst])
+        
+        # False negatives is possibly the max?
+        f_n[clst] = np.sum(f_n[clst])#np.max(f_n[clst])
         
     return f_p, f_n
 
