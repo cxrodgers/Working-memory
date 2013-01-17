@@ -27,8 +27,10 @@ import numpy as np
 import pandas
 import os.path
 import glob
-from KKFileSchema import KKFileSchema
-
+try:
+    from KKFileSchema import KKFileSchema
+except ImportError:
+    from kkpandas.KKFileSchema import KKFileSchema
 SPIKE_TIME_COLUMN_NAME = 'time'
 
 # Bare-bones input/output functions for each filetype

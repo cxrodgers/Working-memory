@@ -11,8 +11,22 @@ Last modified: 8/2/2012
 import numpy as np
 
 from scipy.special import erf
-from sklearn import mixture
+try:
+    from sklearn import mixture
+except ImportError:
+    from scikits.learn import mixture
 from itertools import combinations
+try:
+    from KKFileSchema import KKFileSchema
+except ImportError:
+    from kkpandas.KKFileSchema import KKFileSchema
+import os
+import kkio
+#~ try:
+    #~ import kkio
+#~ except:
+    #~ from kkpandas import kkio
+
 
 def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
     ''' This function takes the feature, cluster, and spike files in KlustaKwik format 
@@ -33,11 +47,6 @@ def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
         out['times'] :  dictionary of clustered spike times
         out['waveforms'] : dictionary of clustered spike waveforms
     '''
-    
-    from KKFileSchema import KKFileSchema
-    import os
-    import kkio
-    
     # Get the clustered data from Klustakwik files
     kfs = KKFileSchema.coerce(data_dir)
     
