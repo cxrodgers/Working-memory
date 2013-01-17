@@ -11,21 +11,26 @@ Last modified: 8/2/2012
 import numpy as np
 
 from scipy.special import erf
+
+# Scikits.learn changes the import command
 try:
     from sklearn import mixture
 except ImportError:
+    # This is probably too old of a version to work anyway
     from scikits.learn import mixture
+
 from itertools import combinations
+
+# Not in this directory, depends on how it's stored
 try:
     from KKFileSchema import KKFileSchema
 except ImportError:
     from kkpandas.KKFileSchema import KKFileSchema
+
 import os
+
+# This is in this directory
 import kkio
-#~ try:
-    #~ import kkio
-#~ except:
-    #~ from kkpandas import kkio
 
 
 def load_spikes(data_dir, group, samp_rate, n_samp, n_chan):
@@ -128,7 +133,8 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
     # Calculate the false positive rate for each cluster.
     for clst, times in clustered_times.iteritems():
         # This finds the time difference between consecutive peaks
-        isi = np.array([ jj - ii for ii, jj in zip(times[:-1], times[1:]) ])
+        #isi = np.array([ jj - ii for ii, jj in zip(times[:-1], times[1:]) ])
+        isi = np.diff(times)
         
         # Now we need to find the number of refractory period violations
         ref = np.sum(isi <= t_ref)
