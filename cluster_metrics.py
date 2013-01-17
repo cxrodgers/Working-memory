@@ -153,12 +153,20 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
     
     return f_p_1
 
-def threshold(clustered_waveforms, thresh):
+def threshold(clustered_waveforms, thresh, warn_on_thresh_violation=True, peak_sample=6, n_samp=24):
     ''' Returns the rate of false negatives caused by spikes below the 
     detection threshold
     
+    Fits a Gaussian to the distribution of waveform peaks. If this Gaussian
+    looks truncated at the threshold, then the area beyond this truncation
+    is an estimate of the number of missing spikes.
+    
     Parameters
     -----------------------------------------
+    peak_sample, n_samp : where the waveform peaks "should" be
+        If you don't provide this, the peaks over the whole waveform are used.    
+    warn_on_thresh_violation : if any peaks are detected that are below
+        threshold (which should never happen), issue a warning
     clustered_waveforms : dictionary of clustered waveforms, you get this 
         from load_spikes function
     thresh : detection threshold used for spike sorting
@@ -178,22 +186,25 @@ def threshold(clustered_waveforms, thresh):
     
     for clst, spikes in cl_spikes.iteritems():
         # Get the peak heights for each spike
-        peaks = [ np.min(spk) for spk in spikes ]
+        if peak_sample is None:
+            peaks = np.min(spikes, axis=1)
+        else:
+            peaks = np.min(spikes[:, peak_sample::n_samp], axis=1)
         
-        freq, x = np.histogram( peaks, 50 )
-        
-        X = x[:-1] + (x[1]-x[0])/2.
+        # check if the threshold make sense with the data
+        mp = peaks.max()
+        if warn_on_thresh_violation and mp > thresh + .1: # a little slop
+            print "warning: got peak at %r but thresh is %r" % (mp, thresh)
         
         # Find the moments of the data distribution
-        mu = np.sum(X*freq)/np.sum(freq)
-        sigma = np.sqrt(np.abs(np.sum((X-mu)**2*freq)/np.sum(freq)))
+        mu = peaks.mean()
+        sigma = peaks.std()
         
         # The false negative percentage is the cumulative Gaussian function
         # up to the detection threshold
-        
         cdf = 0.5*(1 + erf((thresh - mu)/np.sqrt(2*sigma**2)))
         f_n[clst] = (1-cdf) 
-            
+    
     return f_n
     
 def overlap(clustered_features, ignore = [0]):
@@ -301,6 +312,17 @@ def overlap(clustered_features, ignore = [0]):
 def censored(clustered_times, t_cen, t_exp):
     ''' Returns the estimated false negative rate caused by spikes censored
     after a detected spike
+    
+    The idea is that a spike cannot be detected if another spike was 
+    already detected within `t_cen` seconds. So, if we assume spikes occur
+    independently, we can multiply the firing rate of all other neurons
+    combined by the censored time, to estimate the chances that another spike
+    occurred.
+    
+    If you prioritized bigger waveforms over smaller, then the true censored
+    rate will be higher for the units with smaller waveforms and lower for
+    the units with bigger waveforms. But this function does not take that
+    into account.
     
     Parameters
     -----------------------------------------
