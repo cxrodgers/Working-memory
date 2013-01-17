@@ -226,7 +226,7 @@ def fraction_during_refractory(clustered_times, t_ref):
     return f_p
 
 
-def overlap_with_svm(clustered_features, ignore=None):
+def overlap_with_svm(clustered_features, include_list=None, exclude_list=None):
     """Evaluate cluster overlap by the prediction quality of an SVM.
     
     Fit an SVM to the data (with labels). Take the predictions of the SVM
@@ -258,7 +258,11 @@ def overlap_with_svm(clustered_features, ignore=None):
     Parameters:
     clustered_features : dict
         {cluster_id : feature array of shape (N_spikes, N_features)}
-    ignore : list of cluster_id to ignore
+    include_list : only clusters in this list will be included
+    exclude_list : exclude clusters in this list
+    
+    Note that including or excluding clusters will probably (definitely?)
+    inflate the scores of the remaining units.
     
     Returns: f_p, f_n, confusion
     f_p, f_n : dicts
@@ -270,11 +274,12 @@ def overlap_with_svm(clustered_features, ignore=None):
         clustered as i was clustered as j by the SVM.
         The rows and columns are sorted by the keys in clustered_features.
     """
-    # Figure out which to ignore
-    if ignore is None:
-        ignore = [0]
+    # Figure out which units to include
     unit_ids = sorted(clustered_features.keys())
-    unit_ids = [uid for uid in unit_ids if uid not in ignore]
+    if include_list:
+        unit_ids = filter(lambda uid: uid in include_list, unit_ids)
+    elif exclude_list:
+        unit_ids = filter(lambda uid: uid not in exclude_list, unit_ids)
     
     # Concatenate the data and original labels into the shape expected
     # by the classifier
