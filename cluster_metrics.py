@@ -135,13 +135,13 @@ def refractory(clustered_times, t_ref, t_cen, t_exp):
         # Now we need to find the number of refractory period violations
         ref = np.sum(isi <= t_ref)
         if ref == 0:
-            false_pos[cid] = 0
+            f_p_1[clst] = 0
             continue
         
         N = float(len(times))
         # This part calculates the false positive estimate (See the paper)
         long_thing = ref*t_exp/(t_ref-t_cen)/(2.0*N*N)
-        f_p_1[cid] =(1 - np.sqrt(1-4*long_thing))/2.0
+        f_p_1[clst] =(1 - np.sqrt(1-4*long_thing))/2.0
     
     return f_p_1
 
