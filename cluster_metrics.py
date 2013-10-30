@@ -222,6 +222,49 @@ def fraction_during_refractory(clustered_times, t_ref):
     return f_p
 
 
+def overlap_with_svm2(clustered_features, good_unit_list):
+    """Wrapper around overlap_with_svm: each good unit vs the noise cluster.
+    
+    In general there are several types of overlap analysis:
+    1)  All vs all, including noise and good units.
+    2)  All vs all, including only good units
+    3)  Each good unit versus the noise clusters
+    
+    This implements the 3rd. You provide all the ids that are good.
+    For each good unit:
+        1) Discard all other good units
+        2) Combine all noise units into one
+        3) Train SVM to discriminate the good unit from the noise
+    
+    Returns: dict by good unit
+        Each is the result from overlap_with_svm
+    """
+    # Cluster all 
+    all_units = clustered_features.keys()
+    for u in good_unit_list:
+        assert u in all_units
+    noise_units = filter(lambda u: u not in good_unit_list, all_units)
+    
+    # What to call the new noise unit
+    noise_unit_id = np.max(all_units) + 1
+    
+    # New clustered features, with all noise units as one
+    cfs = {}
+    cfs[noise_unit_id] = []
+    for u, feat_array in clustered_features.items():
+        if u in noise_units:
+            cfs[noise_unit_id].append(feat_array.copy())
+        else:
+            cfs[u] = feat_array.copy()
+    cfs[noise_unit_id] = np.vstack(cfs[noise_unit_id])
+    
+    # Train each vs noise
+    res = {}
+    for u in good_unit_list:
+        res[u] = overlap_with_svm(cfs, include_list=[noise_unit_id, u])
+    
+    return res
+    
 def overlap_with_svm(clustered_features, include_list=None, exclude_list=None):
     """Evaluate cluster overlap by the prediction quality of an SVM.
     
